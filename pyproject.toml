@@ -1,0 +1,27 @@
+[project]
+name = "market-surprise-reaction"
+authors = [{name = "Harsh Vardhan Gupta", email = "hvgupta@outlook.in"}]
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp",
+    "fastapi[standard]",
+    "pandas>=3.0.2",
+    "python-dotenv",
+    "uv",
+]
+
+[project.urls]
+GitHub = "https://github.com/hvgupta/Stock-Surprise-and-Reaction"
+
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

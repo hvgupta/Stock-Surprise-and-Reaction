@@ -1,2 +1,8 @@
 *.egg-info/
 .env
+
+**.ipynb
+
+**/__pycache__/
+
+app.log

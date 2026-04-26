@@ -15,4 +15,4 @@ def fetch_sp500_companies() -> pd.DataFrame:
     sp500 = pd.read_html(StringIO(response.text))[0]
 
     logger.info("Successfully fetched S&P 500 company list")
-    return sp500
+    return sp500.drop(sp500["Symbol"].str.contains(r"\.", na=False)).reset_index(drop=True)

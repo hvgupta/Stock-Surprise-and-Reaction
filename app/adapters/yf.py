@@ -2,9 +2,34 @@ from app.logger import get_configured_logger
 
 logger = get_configured_logger(__name__)
 
+import pandas as pd
 import yfinance as yf
 from typing import Optional
 
+async def fetch_ticker_historical_prices(
+    ticker_symbol: str, start_date: str, end_date: str
+) -> pd.DataFrame:
+    """
+    yfinance is synchronous; run the download call in a thread to avoid blocking the event loop.
+    """
+    logger.info(
+        f"Fetching historical prices for {ticker_symbol} from {start_date} to {end_date} (async)"
+    )
+
+    data = yf.download(
+        ticker_symbol, start=start_date, end=end_date, multi_level_index=False
+    )
+
+    logger.info(f"Successfully fetched historical prices for {ticker_symbol}")
+
+    if data is None or data.empty:
+        logger.warning(f"No historical price data found for {ticker_symbol}")
+        raise ValueError(f"No historical price data found for {ticker_symbol}")
+
+    data.reset_index(inplace=True)
+    data["Date"] = pd.to_datetime(data["Date"])
+
+    return data
 
 def get_current_pe_of_ticker(ticker: str) -> Optional[float]:
     logger.info(f"Fetching current P/E ratio for {ticker}")

@@ -5,7 +5,22 @@ logger = get_configured_logger(__name__)
 import yfinance as yf
 from typing import Optional
 
-def get_forward_pe_of_company(ticker: str) -> Optional[float]:
+
+def get_current_pe_of_ticker(ticker: str) -> Optional[float]:
+    logger.info(f"Fetching current P/E ratio for {ticker}")
+    yf_ticker = yf.Ticker(ticker)
+    try:
+        pe_ratio = yf_ticker.info.get('trailingPE', None)
+        if pe_ratio is not None:
+            logger.info(f"Current P/E ratio for {ticker}: {pe_ratio}")
+        else:
+            logger.warning(f"Current P/E ratio not found for {ticker}")
+        return pe_ratio
+    except Exception as e:
+        logger.error(f"Error fetching current P/E ratio for {ticker}: {e}")
+        return None
+
+def get_current_forward_pe_of_ticker(ticker: str) -> Optional[float]:
     logger.info(f"Fetching forward P/E ratio for {ticker}")
     yf_ticker = yf.Ticker(ticker)
     try:

@@ -17,3 +17,13 @@ How will the surprise be calculated:
     - the reaction of the market can be defined as $R_\text{ticker} - R_m$
 
 
+
+## plan
+
+data storage
+    - possible storage
+        - local files
+        - supabase
+        - sqllite3 -> the simpliest and most appropiate for this small project
+
+    - might not be needed, since all the other functions dont really have a rate limit

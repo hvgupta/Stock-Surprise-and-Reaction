@@ -1,6 +1,16 @@
-from .sql_functions import SQLiteDatabase, initialize_db
+from .sql_functions import (
+    SQLiteDatabase,
+    get_all_supported_tickers,
+    get_ticker_surprise,
+    get_eps_data_of_ticker,
+    insert_surprise_data,
+)
 from .SP500_companies import fetch_sp500_companies
-from .financials import calc_surprise_of_ticker, calc_market_return, calc_reaction_of_ticker
+from .financials import (
+    calc_surprise_of_ticker,
+    calc_market_return,
+    calc_reaction_of_ticker,
+)
 
 SP500_COMPANIES = fetch_sp500_companies()
 
@@ -10,5 +20,8 @@ __all__ = [
     "calc_market_return",
     "calc_reaction_of_ticker",
     "SQLiteDatabase",
-    "initialize_db",
+    "get_all_supported_tickers",
+    "get_ticker_surprise",
+    "get_eps_data_of_ticker",
+    "insert_surprise_data", 
 ]

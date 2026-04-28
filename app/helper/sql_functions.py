@@ -1,15 +1,9 @@
-import sqlite3
-
 from app.logger import get_configured_logger
 
 logger = get_configured_logger(__name__)
 
-
-def initialize_db(db_path: str) -> None:
-    """Initializes the SQLite database with the required tables."""
-    with SQLiteDatabase(db_path) as database:
-        database.initialize()
-
+import sqlite3
+from typing import Optional, Tuple
 
 class SQLiteDatabase:
     """Small wrapper around a SQLite connection with context-managed cleanup."""
@@ -46,26 +40,28 @@ class SQLiteDatabase:
         cursor = self.cursor()
 
         # Create earnings_calendar table
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS earnings_calendar (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
-                date TEXT NOT NULL,
                 eps_actual REAL,
                 eps_estimated REAL
             )
-        ''')
+        """
+        )
 
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS ticker_data (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
-                date TEXT NOT NULL,
                 surprise REAL,
                 eod_return REAL,
                 reaction REAL
             )
-        ''')
+        """
+        )
 
     def execute(
         self,
@@ -75,3 +71,50 @@ class SQLiteDatabase:
         cursor = self.cursor()
         cursor.execute(query, params)
         return cursor.fetchall()
+
+
+def get_all_supported_tickers(db: SQLiteDatabase) -> list[str]:
+    """Fetches all supported tickers from the database."""
+    rows = db.execute("SELECT DISTINCT symbol FROM earnings_calendar")
+    return [row[0] for row in rows]
+
+
+def get_ticker_surprise(db: SQLiteDatabase, ticker: str) -> Optional[float]: 
+    surprise_value = db.execute(
+        """
+        SELECT surprise 
+        FROM ticker_data
+        WHERE symbol = ?
+        LIMIT 1
+        """,
+        (ticker,),
+    )
+    if surprise_value:
+        return surprise_value[0][0]
+    else:
+        return None
+    
+
+def get_eps_data_of_ticker(db: SQLiteDatabase, ticker: str) -> Optional[Tuple[float, float]]:
+    eps_data = db.execute(
+        """
+        SELECT eps_actual, eps_estimated
+        FROM earnings_calendar
+        WHERE symbol = ?
+        LIMIT 1
+        """,
+        (ticker,),
+    )
+    if eps_data:
+        return eps_data[0][0], eps_data[0][1]
+    else:
+        return None
+    
+def insert_surprise_data(db: SQLiteDatabase, ticker: str, surprise: float) -> None:
+    db.execute(
+        """
+        INSERT INTO ticker_data (symbol, surprise)
+        VALUES (?, ?)
+        """,
+        (ticker, surprise),
+    )

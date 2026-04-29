@@ -14,4 +14,4 @@ frontend/out
 frontend/*coverage
 
 
-**.db
+**.db**

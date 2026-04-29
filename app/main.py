@@ -19,7 +19,7 @@ logger = get_configured_logger(__name__)
 
 import dotenv
 from typing import cast
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from contextlib import asynccontextmanager
 
 dotenv.load_dotenv(override=True)
@@ -75,8 +75,7 @@ async def fetch_surprise_for_ticker(ticker: str):
 
 
 @app.get("/{ticker}/reaction")
-async def fetch_reaction_for_ticker(reaction_request: ReactionRequest):
-    ticker = reaction_request.ticker
+async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionRequest = Depends()):
     num_days = reaction_request.num_day_return
     threshold = reaction_request.threshold
     market_index = reaction_request.market_index

@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down the application...")
         app.state.database = None
 
+
 app = FastAPI(lifespan=lifespan)
 
 from app.adapters import (
@@ -75,7 +76,9 @@ async def fetch_surprise_for_ticker(ticker: str):
 
 
 @app.get("/{ticker}/reaction")
-async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionRequest = Depends()):
+async def fetch_reaction_for_ticker(
+    ticker: str, reaction_request: ReactionRequest = Depends()
+):
     num_days = reaction_request.num_day_return
     threshold = reaction_request.threshold
     market_index = reaction_request.market_index
@@ -86,7 +89,7 @@ async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionReque
             status_code=400,
             detail=f"the surprise value {surprise['surprise']} for ticker {ticker} is below the threshold of {threshold}, so reaction is not calculated",
         )
-    
+
     db_conn = cast(SQLiteDatabase, app.state.database)
     reaction = get_ticker_reaction(db_conn, ticker)
     if reaction is not None:
@@ -97,8 +100,10 @@ async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionReque
             status_code=404,
             detail=f"filing date not found for ticker {ticker}, cannot calculate reaction",
         )
-    
-    market_n_day_return = get_n_day_return_of_ticker(market_index, filing_date, num_days)
+
+    market_n_day_return = get_n_day_return_of_ticker(
+        market_index, filing_date, num_days
+    )
     if market_n_day_return is None:
         raise HTTPException(
             status_code=404,
@@ -112,9 +117,14 @@ async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionReque
         )
 
     reaction = calc_reaction_of_ticker(ticker_n_day_return, market_n_day_return)
-    upsert_reaction_data(db_conn, ticker, reaction)  
-    return {"ticker": ticker, "reaction": reaction}
-      
+    upsert_reaction_data(db_conn, ticker, reaction)
+    return {
+        "ticker": ticker,
+        "reaction": reaction,
+        "surprise": surprise["surprise"],
+        "market_n_day_return": market_n_day_return,
+        "ticker_n_day_return": ticker_n_day_return,
+    }
 
 
 @app.get("/{ticker}/pe")

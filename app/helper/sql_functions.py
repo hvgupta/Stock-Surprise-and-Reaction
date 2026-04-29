@@ -45,6 +45,7 @@ class SQLiteDatabase:
             CREATE TABLE IF NOT EXISTS earnings_calendar (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
+                date TEXT NOT NULL,
                 eps_actual REAL,
                 eps_estimated REAL
             )
@@ -94,6 +95,21 @@ def get_ticker_surprise(db: SQLiteDatabase, ticker: str) -> Optional[float]:
     else:
         return None
     
+def get_ticker_reaction(db: SQLiteDatabase, ticker: str) -> Optional[float]:
+    reaction_value = db.execute(
+        """
+        SELECT reaction 
+        FROM ticker_data
+        WHERE symbol = ?
+        LIMIT 1
+        """,
+        (ticker,),
+    )
+    if reaction_value:
+        return reaction_value[0][0]
+    else:
+        return None
+
 
 def get_eps_data_of_ticker(db: SQLiteDatabase, ticker: str) -> Optional[Tuple[float, float]]:
     eps_data = db.execute(
@@ -110,11 +126,35 @@ def get_eps_data_of_ticker(db: SQLiteDatabase, ticker: str) -> Optional[Tuple[fl
     else:
         return None
     
-def insert_surprise_data(db: SQLiteDatabase, ticker: str, surprise: float) -> None:
+def get_ticker_filing_date(db: SQLiteDatabase, ticker: str) -> Optional[str]:
+    filing_date = db.execute(
+        """
+        SELECT date
+        FROM earnings_calendar
+        WHERE symbol = ?
+        LIMIT 1
+        """,
+        (ticker,),
+    )
+    if filing_date:
+        return filing_date[0][0]
+    else:
+        return None
+    
+def upsert_surprise_data(db: SQLiteDatabase, ticker: str, surprise: float) -> None:
     db.execute(
         """
-        INSERT INTO ticker_data (symbol, surprise)
+        INSERT OR REPLACE INTO ticker_data (symbol, surprise)
         VALUES (?, ?)
         """,
         (ticker, surprise),
+    )
+
+def upsert_reaction_data(db: SQLiteDatabase, ticker: str, reaction: float) -> None:
+    db.execute(
+        """
+        INSERT OR REPLACE INTO ticker_data (symbol, reaction)
+        VALUES (?, ?)
+        """,
+        (ticker, reaction),
     )

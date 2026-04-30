@@ -10,3 +10,4 @@ class ReactionRequest(BaseModel):
     num_day_return: int = Query(default=1, ge=1, le=4)
     market_index: str = Query(default="SPY")
     threshold: float = Query(default=DEFAULT_THRESHOLD)
+    date: str | None = Query(default=None)

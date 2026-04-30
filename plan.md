@@ -27,3 +27,12 @@ data storage
         - sqllite3 -> the simpliest and most appropiate for this small project
 
     - might not be needed, since all the other functions dont really have a rate limit
+
+## API notes (current)
+- Populate the DB (yfinance earnings history for S&P500): `POST /populate/sp500/earnings_calendar`
+    - Uses a concurrency limit via `batch_size` query param (default 10).
+    - Upserts all available earnings history rows into `earnings_calendar` keyed by `(symbol, date)`.
+- Surprise endpoint: `GET /{ticker}/surprise?date=YYYY-MM-DD` (date optional)
+    - If `date` is omitted, uses the most recent earnings date available in `earnings_calendar`.
+- Reaction endpoint: `GET /{ticker}/reaction?date=YYYY-MM-DD&num_day_return=...&market_index=...&threshold=...`
+    - Reaction is calculated starting from the same `date` used for the surprise.

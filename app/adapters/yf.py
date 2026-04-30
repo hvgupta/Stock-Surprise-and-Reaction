@@ -16,6 +16,20 @@ def _ceil_working_day(date: datetime) -> datetime:
         date += timedelta(days=1)
     return date
 
+def get_earnings_history_of_ticker(ticker: str) -> Optional[pd.DataFrame]:
+    logger.info(f"Fetching earnings history for {ticker}")
+    yf_ticker = yf.Ticker(ticker)
+    try:
+        earnings_history = yf_ticker.get_earnings_history()
+        if earnings_history is not None and not earnings_history.empty: # type: ignore
+            logger.info(f"Successfully fetched earnings history for {ticker}")
+            return earnings_history # type: ignore
+        else:
+            logger.warning(f"No earnings history found for {ticker}")
+            return None
+    except Exception as e:
+        logger.error(f"Error fetching earnings history for {ticker}: {e}")
+        return None
 
 def get_n_day_return_of_ticker(ticker: str, date: str, n: int = 1) -> Optional[float]:
     logger.info(f"Fetching {n}-day return for {ticker} on {date}")

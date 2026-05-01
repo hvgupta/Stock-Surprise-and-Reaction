@@ -5,8 +5,8 @@ from contextlib import asynccontextmanager
 import dotenv
 from fastapi import FastAPI
 
-from app.logger import get_configured_logger
-from app.sql_functions import SQLiteDatabase
+from backend.logger import get_configured_logger
+from backend.sql_functions import SQLiteDatabase
 
 logger = get_configured_logger(__name__)
 

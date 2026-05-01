@@ -1,4 +1,4 @@
-from app.adapters import (
+from backend.adapters import (
     SP500_COMPANIES,
     fetch_ticker_historical_prices,
     get_current_forward_pe_of_ticker,
@@ -6,9 +6,9 @@ from app.adapters import (
     get_earnings_history_of_ticker,
     get_last_earnings_call_of_ticker,
 )
-from app.logger import get_configured_logger
-from app.model import PropotionateRequest, ReactionRequest, SurpriseEndpointResponse
-from app.sql_functions import (
+from backend.logger import get_configured_logger
+from backend.model import PropotionateRequest, ReactionRequest, SurpriseEndpointResponse
+from backend.sql_functions import (
     SQLiteDatabase,
     get_all_supported_tickers,
     get_dates_of_ticker,
@@ -18,7 +18,7 @@ from app.sql_functions import (
     ticker_in_db,
     upsert_proportionality_model,
 )
-from app.helper_functions import (
+from backend.helper_functions import (
     get_reaction_for_date,
     get_surprise_for_date,
     normalize_date_str,

@@ -1,6 +1,6 @@
 from fastapi import Query
-from typing import Dict, Optional, TypedDict
 from pydantic import BaseModel, model_validator
+from typing import Dict, Optional, TypedDict, Union
 
 DEFAULT_THRESHOLD = 0.03
 
@@ -18,8 +18,7 @@ class PropotionateRequest(BaseModel):
     reaction_date: Optional[str] = Query(default=None)
     surprise: Optional[float] = Query(default=None)
     cumalative_reaction: Optional[float] = Query(default=None)
-    # Validation is intentionally lightweight here; the handler enforces required
-    # parameters (e.g. `filings_date`) because endpoint semantics vary.
+
     @model_validator(mode="after")
     def validate_at_least_one_field(self: "PropotionateRequest") -> "PropotionateRequest":
         # Enforce that either filings_date/date is provided, or both surprise and cumalative_reaction
@@ -35,3 +34,7 @@ class PropotionateRequest(BaseModel):
 class SurpriseEndpointResponse(TypedDict):
     ticker: str
     surprise: Dict[str, float]
+
+class ReactionEndpointResponse(TypedDict):
+    ticker: str
+    reaction_data: Dict[str, Dict[str, Union[float, str]]]

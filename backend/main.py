@@ -7,7 +7,12 @@ from backend.adapters import (
     get_last_earnings_call_of_ticker,
 )
 from backend.logger import get_configured_logger
-from backend.model import PropotionateRequest, ReactionRequest, SurpriseEndpointResponse
+from backend.model import (
+    PropotionateRequest,
+    ReactionRequest,
+    SurpriseEndpointResponse,
+    ReactionEndpointResponse,
+)
 from backend.sql_functions import (
     SQLiteDatabase,
     get_all_supported_tickers,
@@ -25,9 +30,9 @@ from backend.helper_functions import (
 
 logger = get_configured_logger(__name__)
 
+import numpy as np
 from typing import Dict, List, Any, cast
 from fastapi import Depends, HTTPException, Query, Request
-import numpy as np
 
 
 async def _compute_sector_proportionality_model(
@@ -283,7 +288,7 @@ async def fetch_surprise_for_ticker(
 
 async def fetch_reaction_for_ticker(
     request: Request, ticker: str, reaction_request: ReactionRequest = Depends()
-):
+) -> ReactionEndpointResponse:
     surprise_threshold = reaction_request.surprise_threshold
     market_index = reaction_request.market_index
 
@@ -329,12 +334,12 @@ async def fetch_reaction_for_ticker(
                 continue
 
             logger.info(f"the reaction is {reaction}")
-            
-            date_to_reaction_data[filing_date] ={
+
+            date_to_reaction_data[filing_date] = {
                 "reaction": reaction[filing_date],
                 "surprise": surprise["surprise"][filing_date],
             }
-        
+
         except HTTPException as e:
             logger.error(
                 f"Error calculating reaction for {ticker} on {filing_date}: {e.detail}"
@@ -372,13 +377,11 @@ async def fetch_proportionate_for_ticker(
 
     if filings_date is not None:
         surprise_data = await fetch_surprise_for_ticker(request, ticker, filings_date)
-        surprise_map = (
-            surprise_data.get("surprise") if isinstance(surprise_data, dict) else None
-        )
-        if not isinstance(surprise_map, dict) or filings_date not in surprise_map:
+        surprise_map = surprise_data["surprise"]
+        if filings_date not in surprise_map:
             raise HTTPException(
                 status_code=404,
-                detail=f"surprise data not available for {ticker} on filings_date {filings_date}",
+                detail=f"surprise data not available for {ticker} on filings_date {filings_date} or the provided filings_date is not correct",
             )
         surprise_value = float(surprise_map[filings_date])
     else:
@@ -406,47 +409,26 @@ async def fetch_proportionate_for_ticker(
     surpirse_mean, surprise_sd, alpha, beta = proportionality_data
     surprise_z_score = (surprise_value - surpirse_mean) / (surprise_sd + 1e-9)
     expected_CAR = alpha + beta * surprise_z_score
-    # 
 
-    if filings_date is not None:
+    if reaction_date is not None and filings_date is not None:
         reaction_response = await fetch_reaction_for_ticker(
             request,
             ticker,
             ReactionRequest(
                 reaction_days_threshold=3,
                 market_index="SPY",
-                surprise_threshold=0.0,
                 filings_date=filings_date,
                 reaction_date=reaction_date,
             ),
         )
 
-        filing_entry = reaction_response["reaction_data"].get(filings_date)
-        if filing_entry is None:
+        actual_CAR = reaction_response["reaction_data"][filings_date]["reaction"]
+        if isinstance(actual_CAR, str ):
             raise HTTPException(
                 status_code=404,
                 detail=f"reaction data not available for {ticker} on filings_date {filings_date}",
             )
 
-        reaction_series = filing_entry.get("reaction")
-        if isinstance(reaction_series, dict):
-            if reaction_date is not None:
-                if reaction_date not in reaction_series:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"reaction not available for {ticker} on {reaction_date} (filings_date={filings_date})",
-                    )
-                actual_CAR = float(reaction_series[reaction_date])
-            else:
-                last_date = sorted(reaction_series.keys())[-1]
-                actual_CAR = float(reaction_series[last_date])
-        elif isinstance(reaction_series, (int, float)):
-            actual_CAR = float(reaction_series)
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="unexpected reaction data format",
-            )
     else:
         # Use supplied cumulative reaction
         actual_CAR = float(proportionate_request.cumalative_reaction)  # type: ignore[arg-type]

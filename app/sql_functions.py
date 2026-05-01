@@ -302,6 +302,42 @@ def get_ticker_proportionality_data(
     return rows[0] if rows else None
 
 
+def upsert_proportionality_model(
+    db: SQLiteDatabase,
+    sector: str,
+    percent_surprise_mean: float,
+    percent_surprise_sd: float,
+    alpha: float,
+    beta: float,
+) -> None:
+    """Save a proportionality model for a sector.
+
+    The table does not enforce uniqueness on sector, so we delete prior rows
+    for the sector before inserting the latest values.
+    """
+
+    db.execute(
+        """
+        DELETE FROM proportionality_model
+        WHERE sector = ?
+        """,
+        (sector,),
+    )
+    db.execute(
+        """
+        INSERT INTO proportionality_model (
+            sector,
+            percent_surprise_mean,
+            percent_surprise_sd,
+            alpha,
+            beta
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (sector, percent_surprise_mean, percent_surprise_sd, alpha, beta),
+    )
+
+
 def get_dates_of_ticker(db: SQLiteDatabase, ticker: str) -> list[str]:
     rows = db.execute(
         """

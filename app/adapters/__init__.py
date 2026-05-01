@@ -3,7 +3,7 @@ from .yf import (
     get_current_forward_pe_of_ticker,
     get_current_pe_of_ticker,
     get_last_earnings_call_of_ticker,
-    get_n_day_return_of_ticker,
+    get_1d_return_of_ticker,
     get_earnings_history_of_ticker
 )
 from .SP500_companies import fetch_sp500_companies
@@ -20,7 +20,7 @@ __all__ = [
     "get_current_forward_pe_of_ticker",
     "get_current_pe_of_ticker",
     "get_last_earnings_call_of_ticker",
-    "get_n_day_return_of_ticker",
+    "get_1d_return_of_ticker",
     "SP500_COMPANIES",
     "SP500_COMPANIES",
     "calc_surprise_of_ticker",

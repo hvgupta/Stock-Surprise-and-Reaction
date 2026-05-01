@@ -1,73 +1,45 @@
-from app.helper import (
+from app.adapters import (
+    SP500_COMPANIES,
+    fetch_ticker_historical_prices,
+    get_current_forward_pe_of_ticker,
+    get_current_pe_of_ticker,
+    get_earnings_history_of_ticker,
+    get_last_earnings_call_of_ticker,
+)
+from app.logger import get_configured_logger
+from app.model import PropotionateRequest, ReactionRequest
+from app.sql_functions import (
     SQLiteDatabase,
     get_all_supported_tickers,
-    get_ticker_surprise,
-    upsert_earnings_calendar_rows,
-    upsert_surprise_data,
-    upsert_reaction_data,
-    get_ticker_reaction,
     get_dates_of_ticker,
+    get_ticker_proportionality_data,
+    get_ticker_surprise,
     ticker_in_db,
-    upsert_eps_data_of_ticker,
+    upsert_earnings_calendar_rows,
 )
-from app.model import ReactionRequest
-from app.logger import get_configured_logger
-from app.adapters import (
-    get_n_day_return_of_ticker,
-    calc_surprise_of_ticker,
-    calc_reaction_of_ticker,
-    SP500_COMPANIES,
-    get_earnings_history_of_ticker,
-)
+from app.helper_functions import get_reaction_for_date, get_surprise_for_date
 
 logger = get_configured_logger(__name__)
 
-
-import dotenv
 import asyncio
 import pandas as pd
-from typing import cast, Dict, List, Union
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, Query
-
-dotenv.load_dotenv(override=True)
+from typing import Dict, List, Any, cast
+from fastapi import Depends, HTTPException, Query, Request
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    with SQLiteDatabase("./markets.db") as database:
-        database.initialize()
-        app.state.database = database
-        logger.info("Starting up the application...")
-        yield
-        logger.info("Shutting down the application...")
-        app.state.database = None
-
-
-app = FastAPI(lifespan=lifespan)
-
-from app.adapters import (
-    get_current_pe_of_ticker,
-    get_current_forward_pe_of_ticker,
-    get_last_earnings_call_of_ticker,
-    fetch_ticker_historical_prices,
-)
-
-
-@app.get("/health")
 async def health_check():
     return {"status": "ok"}
 
 
-@app.get("/supported_tickers")
-async def get_supported_tickers():
-    all_tickers = get_all_supported_tickers(cast(SQLiteDatabase, app.state.database))
+async def get_supported_tickers(request: Request):
+    all_tickers = get_all_supported_tickers(
+        cast(SQLiteDatabase, request.app.state.database)
+    )
     return {"tickers": all_tickers, "count": len(all_tickers)}
 
 
-@app.get("/{ticker}/dates")
-async def get_filing_dates_for_ticker(ticker: str):
-    db_conn = cast(SQLiteDatabase, app.state.database)
+async def get_filing_dates_for_ticker(request: Request, ticker: str):
+    db_conn = cast(SQLiteDatabase, request.app.state.database)
     filing_dates = get_dates_of_ticker(db_conn, ticker)
     if not filing_dates:
         raise HTTPException(
@@ -77,21 +49,21 @@ async def get_filing_dates_for_ticker(ticker: str):
     return {"ticker": ticker, "filing_dates": filing_dates}
 
 
-@app.get("/{ticker}/surprise")
 async def fetch_surprise_for_ticker(
-    ticker: str, date: str | None = Query(default=None)
+    request: Request, ticker: str, date: str | None = Query(default=None)
 ):
-    db_conn = cast(SQLiteDatabase, app.state.database)
+    db_conn = cast(SQLiteDatabase, request.app.state.database)
 
     surprise = get_ticker_surprise(db_conn, ticker, date)
     logger.info(f"Fetched surprise for {ticker} on {date}: {surprise}")
     if surprise is not None:
-        logger.info(f"Surprise data found in database for {ticker} on {date}, returning cached value")
+        logger.info(
+            f"Surprise data found in database for {ticker} on {date}, returning cached value"
+        )
         return {
             "ticker": ticker,
             "surprise": (surprise if isinstance(surprise, Dict) else {date: surprise}),
         }
-    
 
     if ticker_in_db(db_conn, ticker) is True:
         raise HTTPException(
@@ -106,7 +78,6 @@ async def fetch_surprise_for_ticker(
             detail=f"the ticker {ticker} is not supported, check the /supported_tickers endpoint for the list of supported tickers",
         )
 
-
     if len(eps_data) == 0:
         raise HTTPException(
             status_code=404,
@@ -115,21 +86,19 @@ async def fetch_surprise_for_ticker(
 
     date_to_surprise: Dict[str, float] = {}
 
-    def update_for_date(trailing_eps: float, forward_eps: float, date: str)-> float:
-        surprise = calc_surprise_of_ticker(trailing_eps, forward_eps)
-        upsert_eps_data_of_ticker(db_conn, ticker, date, trailing_eps, forward_eps)
-        upsert_surprise_data(db_conn, ticker, date, surprise)
-        return surprise
-
     for row_date, row in eps_data.iterrows():
         logger.info(f"Processing EPS data for {ticker} on {row_date}")
         logger.info(f"Row data: {row}")
         trailing_eps = row.get("epsActual")
         forward_eps = row.get("epsEstimate")
-        logger.info(f"Processing EPS data for {ticker} on {row_date}: actual={trailing_eps}, estimate={forward_eps}")
+        logger.info(
+            f"Processing EPS data for {ticker} on {row_date}: actual={trailing_eps}, estimate={forward_eps}"
+        )
         if trailing_eps is None or forward_eps is None:
             continue
-        surprise = update_for_date(trailing_eps, forward_eps, str(row_date))
+        surprise = get_surprise_for_date(
+            db_conn, ticker, trailing_eps, forward_eps, str(row_date)
+        )
         date_to_surprise[str(row_date)] = surprise
 
     if date is not None:
@@ -138,16 +107,16 @@ async def fetch_surprise_for_ticker(
     return {"ticker": ticker, "surprise": date_to_surprise}
 
 
-@app.get("/{ticker}/reaction")
 async def fetch_reaction_for_ticker(
-    ticker: str, reaction_request: ReactionRequest = Depends()
+    request: Request, ticker: str, reaction_request: ReactionRequest = Depends()
 ):
     num_days = reaction_request.num_day_return
     threshold = reaction_request.threshold
     market_index = reaction_request.market_index
+    filing_date = reaction_request.filing_date
     date = reaction_request.date
 
-    surprise = await fetch_surprise_for_ticker(ticker, date)
+    surprise = await fetch_surprise_for_ticker(request, ticker, filing_date)
     valid_dates: List[str] = [
         date
         for date, surprise in surprise["surprise"].items()
@@ -160,53 +129,61 @@ async def fetch_reaction_for_ticker(
             detail=f"the surprise value {surprise['surprise']} for ticker {ticker} is below the threshold of {threshold}, so reaction is not calculated",
         )
 
-    db_conn = cast(SQLiteDatabase, app.state.database)
+    db = cast(SQLiteDatabase, request.app.state.database)
 
-    date_to_reaction_data: Dict[str, Dict[str, Union[float, str]]] = {}
-
-    def get_reaction_for_date(filing_date: str) -> float:
-        reaction = get_ticker_reaction(db_conn, ticker, filing_date)
-        if reaction is not None:
-            return reaction
-
-        market_n_day_return = get_n_day_return_of_ticker(
-            market_index, filing_date, num_days
-        )
-        if market_n_day_return is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"could not fetch {num_days}-day return for market index {market_index} starting from {filing_date}, cannot calculate reaction",
-            )
-        ticker_n_day_return = get_n_day_return_of_ticker(ticker, filing_date, num_days)
-        if ticker_n_day_return is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"could not fetch {num_days}-day return for ticker {ticker} starting from {filing_date}, cannot calculate reaction",
-            )
-
-        reaction = calc_reaction_of_ticker(ticker_n_day_return, market_n_day_return)
-        upsert_reaction_data(db_conn, ticker, filing_date, reaction)
-        return reaction
+    date_to_reaction_data: Dict[str, Dict[str, Any]] = {}
 
     for filing_date in valid_dates:
         try:
-            reaction = get_reaction_for_date(filing_date)
+            reaction = get_reaction_for_date(
+                db, ticker, num_days, market_index, filing_date, date
+            )
+            if reaction is None:
+                continue
+
             date_to_reaction_data[filing_date] = {
-                "reaction": reaction,
-                "surprise": surprise["surprise"].get(filing_date),
+                "reaction": reaction[filing_date],
+                "surprise": surprise["surprise"][filing_date],
             }
         except HTTPException as e:
-            logger.error(f"Error calculating reaction for {ticker} on {filing_date}: {e.detail}")
+            logger.error(
+                f"Error calculating reaction for {ticker} on {filing_date}: {e.detail}"
+            )
             date_to_reaction_data[filing_date] = {
-                "reaction": "NA",
-                "surprise": surprise["surprise"].get(filing_date),
-                "error": e.detail,
+                "reaction": e.detail,
+                "surprise": surprise["surprise"][filing_date],
             }
 
     return {
         "ticker": ticker,
         "reaction_data": date_to_reaction_data,
     }
+
+
+async def fetch_proportionate_for_ticker(
+    request: Request,
+    ticker: str,
+    proportionate_request: PropotionateRequest = Depends(),
+):
+    date = proportionate_request.date
+    surprise = proportionate_request.surprise
+    cumalative_reaction = proportionate_request.cumalative_reaction
+
+    surprise_data = await fetch_surprise_for_ticker(request, ticker, date)
+    ticker_sector = str(
+        SP500_COMPANIES.loc[
+            SP500_COMPANIES["Symbol"] == ticker, "GICS Sector"
+        ].values.tolist()[0]
+    )
+    proportionality_data = get_ticker_proportionality_data(
+        cast(SQLiteDatabase, request.app.state.database), ticker_sector
+    )
+    if proportionality_data is not None:
+        surpirse_mean, surprise_sd, alpha, beta = proportionality_data
+
+    all_companies_in_sector: List[str] = SP500_COMPANIES[
+        SP500_COMPANIES["GICS Sector"] == ticker_sector
+    ]["Symbol"].tolist()
 
 
 def _normalize_earnings_history(
@@ -296,15 +273,14 @@ def _normalize_earnings_history(
     return rows
 
 
-@app.post("/populate/sp500/earnings_calendar")
 async def populate_sp500_earnings_calendar(
-    batch_size: int = Query(default=10, ge=1, le=25)
+    request: Request, batch_size: int = Query(default=10, ge=1, le=25)
 ):
     """Fetch S&P500 tickers' historical earnings (yfinance) and upsert into earnings_calendar."""
     from app.adapters.yf import get_earnings_history_of_ticker
 
     tickers = [str(x) for x in SP500_COMPANIES["Symbol"].tolist()]
-    db_conn = cast(SQLiteDatabase, app.state.database)
+    db_conn = cast(SQLiteDatabase, request.app.state.database)
 
     semaphore = asyncio.Semaphore(batch_size)
     inserted_rows = 0
@@ -345,7 +321,6 @@ async def populate_sp500_earnings_calendar(
     }
 
 
-@app.get("/{ticker}/pe")
 async def ticker_pe(ticker: str):
     """Return current trailing and forward P/E ratios for a ticker."""
     trailing = get_current_pe_of_ticker(ticker)
@@ -357,7 +332,6 @@ async def ticker_pe(ticker: str):
     return {"ticker": ticker, "pe": trailing, "forward_pe": forward}
 
 
-@app.get("/{ticker}/earnings_last")
 async def ticker_last_earnings(ticker: str):
     """Return the last earnings call date for a ticker (YYYY-MM-DD)."""
     last = get_last_earnings_call_of_ticker(ticker)
@@ -368,7 +342,6 @@ async def ticker_last_earnings(ticker: str):
     return {"ticker": ticker, "last_earnings_date": last}
 
 
-@app.get("/{ticker}/history")
 async def ticker_history(ticker: str, start: str, end: str):
     """Return historical OHLCV data for a ticker between start and end dates.
 

@@ -9,11 +9,11 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 
-def _ceil_working_day(date: datetime) -> datetime:
+def _ceil_working_day(date: datetime, inc: bool) -> datetime:
     if date.weekday() == 5:  # Saturday
-        date += timedelta(days=2)
+        date += timedelta(days=2) if inc else timedelta(days=-1)
     elif date.weekday() == 6:  # Sunday
-        date += timedelta(days=1)
+        date += timedelta(days=1) if inc else timedelta(days=-2)
     return date
 
 
@@ -41,14 +41,15 @@ def _normalize_date_str(date: str) -> str:
         dt = datetime.strptime(token, "%Y-%m-%d")
         return dt.date().isoformat()
 
+
 def get_earnings_history_of_ticker(ticker: str) -> Optional[pd.DataFrame]:
     logger.info(f"Fetching earnings history for {ticker}")
     yf_ticker = yf.Ticker(ticker)
     try:
         earnings_history = yf_ticker.get_earnings_history()
-        if earnings_history is not None and not earnings_history.empty: # type: ignore
+        if earnings_history is not None and not earnings_history.empty:  # type: ignore
             logger.info(f"Successfully fetched earnings history for {ticker}")
-            return earnings_history # type: ignore
+            return earnings_history  # type: ignore
         else:
             logger.warning(f"No earnings history found for {ticker}")
             return None
@@ -56,22 +57,23 @@ def get_earnings_history_of_ticker(ticker: str) -> Optional[pd.DataFrame]:
         logger.error(f"Error fetching earnings history for {ticker}: {e}")
         return None
 
-def get_n_day_return_of_ticker(ticker: str, date: str, n: int = 1) -> Optional[float]:
-    logger.info(f"Fetching {n}-day return for {ticker} on {date}")
+
+def get_1d_return_of_ticker(ticker: str, date: str) -> Optional[float]:
+    logger.info(f"Fetching 1-day return for {ticker} on {date}")
     yf_ticker = yf.Ticker(ticker)
 
     date = _normalize_date_str(date)
 
     start_date = date
     end_date = _ceil_working_day(
-        datetime.strptime(date, "%Y-%m-%d") + timedelta(days=n + 1)
-    ).strftime("%Y-%m-%d")
+        datetime.fromisoformat(date) + timedelta(days=2), inc=True
+    ).isoformat()
 
     try:
         # Get data including the target date
         hist = yf_ticker.history(start=start_date, end=end_date)
     except Exception as e:
-        logger.error(f"Error fetching {n}-day return for {ticker} on {date}: {e}")
+        logger.error(f"Error fetching 1-day return for {ticker} on {date}: {e}")
         return None
 
     if hist.empty:

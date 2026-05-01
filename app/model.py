@@ -18,13 +18,13 @@ class PropotionateRequest(BaseModel):
     date: Optional[str] = Query(default=None)
     surprise: Optional[float] = Query(default=None)
     cumalative_reaction: Optional[float] = Query(default=None)
-
+    # Validation is intentionally lightweight here; the handler enforces required
+    # parameters (e.g. `filings_date`) because endpoint semantics vary.
     @model_validator(mode="after")
-    def validate_at_least_one_field(self):
-        if (
-            self.date is None
-            and self.filings_date is None
-            and (self.surprise is None or self.cumalative_reaction is None)
+    def validate_at_least_one_field(self: "PropotionateRequest") -> "PropotionateRequest":
+        # Enforce that either filings_date/date is provided, or both surprise and cumalative_reaction
+        if (self.date is None and self.filings_date is None) and (
+            self.surprise is None or self.cumalative_reaction is None
         ):
             raise ValueError(
                 "Provide either filings_date/date, or both surprise and cumalative_reaction"

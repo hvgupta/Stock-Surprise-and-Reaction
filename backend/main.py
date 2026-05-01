@@ -410,7 +410,7 @@ async def fetch_proportionate_for_ticker(
     surprise_z_score = (surprise_value - surpirse_mean) / (surprise_sd + 1e-9)
     expected_CAR = alpha + beta * surprise_z_score
 
-    if reaction_date is not None and filings_date is not None:
+    if filings_date is not None:
         reaction_response = await fetch_reaction_for_ticker(
             request,
             ticker,
@@ -423,7 +423,7 @@ async def fetch_proportionate_for_ticker(
         )
 
         actual_CAR = reaction_response["reaction_data"][filings_date]["reaction"]
-        if isinstance(actual_CAR, str ):
+        if isinstance(actual_CAR, str):
             raise HTTPException(
                 status_code=404,
                 detail=f"reaction data not available for {ticker} on filings_date {filings_date}",
@@ -433,17 +433,35 @@ async def fetch_proportionate_for_ticker(
         # Use supplied cumulative reaction
         actual_CAR = float(proportionate_request.cumalative_reaction)  # type: ignore[arg-type]
 
-    pct_diff_from_expected = (
-        None
-        if abs(expected_CAR) < 1e-12
-        else (actual_CAR - expected_CAR) / expected_CAR
+    logger.info(
+        f"Computed proportionality for {ticker}: expected_CAR={expected_CAR}, actual_CAR={actual_CAR}"
     )
 
-    return {
-        "pct_diff_from_expected": pct_diff_from_expected,
-        "expected_CAR": expected_CAR,
-        "actual_CAR": actual_CAR,
-    }
+
+    if isinstance(actual_CAR, (int, float)):
+        pct_diff_from_expected = (
+            None
+            if abs(expected_CAR) < 1e-12
+            else (actual_CAR - expected_CAR) / expected_CAR
+        )
+
+        return {
+            "pct_diff_from_expected": pct_diff_from_expected,
+            "expected_CAR": expected_CAR,
+            "actual_CAR": actual_CAR,
+        }
+
+    pct_diff_from_expected_map = {}
+    for date, reaction in actual_CAR.items():
+        if isinstance(reaction, str):
+            continue
+        pct_diff_from_expected_map[date] = {
+            "pct_diff_from_expected": None if abs(expected_CAR) < 1e-12 else (reaction - expected_CAR) / expected_CAR,
+            "expected_CAR": expected_CAR,
+            "actual_CAR": reaction,
+        }
+    
+    return pct_diff_from_expected_map
 
 
 async def ticker_pe(ticker: str):

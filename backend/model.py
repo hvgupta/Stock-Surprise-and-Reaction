@@ -37,4 +37,4 @@ class SurpriseEndpointResponse(TypedDict):
 
 class ReactionEndpointResponse(TypedDict):
     ticker: str
-    reaction_data: Dict[str, Dict[str, Union[float, str]]]
+    reaction_data: Dict[str, Dict[str, Dict[str, Union[float, str]]]]

@@ -3,7 +3,7 @@ from app.logger import get_configured_logger
 logger = get_configured_logger(__name__)
 
 import sqlite3
-from typing import Iterable, Optional, Tuple, List, Dict, overload, Union
+from typing import Iterable, Optional, Dict, overload, Union
 
 type DateValues[T] = Union[T, Dict[str, T]]
 
@@ -28,6 +28,8 @@ class SQLiteDatabase:
                 self.connection.commit()
             else:
                 self.connection.rollback()
+        except Exception as e:
+            logger.error(f"Error during database commit/rollback: {e}, {traceback}")
         finally:
             self.connection.close()
             self.connection = None

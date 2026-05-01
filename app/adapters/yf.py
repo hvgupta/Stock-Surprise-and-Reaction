@@ -16,6 +16,31 @@ def _ceil_working_day(date: datetime) -> datetime:
         date += timedelta(days=1)
     return date
 
+
+def _normalize_date_str(date: str) -> str:
+    date = date.strip()
+    if not date:
+        raise ValueError("date must be a non-empty string")
+
+    # Fast path
+    if len(date) == 10 and date[4] == "-" and date[7] == "-":
+        return date
+
+    candidate = date
+    # Handle trailing Z (UTC) for fromisoformat
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1]
+
+    try:
+        dt = datetime.fromisoformat(candidate)
+        return dt.date().isoformat()
+    except ValueError:
+        # Common pandas string form: "YYYY-MM-DD HH:MM:SS"
+        # If there are extra parts, keep only the date token.
+        token = date.split()[0]
+        dt = datetime.strptime(token, "%Y-%m-%d")
+        return dt.date().isoformat()
+
 def get_earnings_history_of_ticker(ticker: str) -> Optional[pd.DataFrame]:
     logger.info(f"Fetching earnings history for {ticker}")
     yf_ticker = yf.Ticker(ticker)
@@ -34,6 +59,8 @@ def get_earnings_history_of_ticker(ticker: str) -> Optional[pd.DataFrame]:
 def get_n_day_return_of_ticker(ticker: str, date: str, n: int = 1) -> Optional[float]:
     logger.info(f"Fetching {n}-day return for {ticker} on {date}")
     yf_ticker = yf.Ticker(ticker)
+
+    date = _normalize_date_str(date)
 
     start_date = date
     end_date = _ceil_working_day(

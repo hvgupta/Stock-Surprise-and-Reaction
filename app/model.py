@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from fastapi import Query
 
 
-DEFAULT_THRESHOLD = 0.1
+DEFAULT_THRESHOLD = 0.03
 
 
 class ReactionRequest(BaseModel):

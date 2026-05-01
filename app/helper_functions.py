@@ -18,11 +18,37 @@ logger = get_configured_logger(__name__)
 from typing import Optional
 from fastapi import HTTPException
 from datetime import datetime, timedelta
+import re
+
+
+_DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+def normalize_date_str(value: str) -> str:
+    """Normalize a date-like string to YYYY-MM-DD.
+
+    Accepts values like:
+    - "2025-03-31"
+    - "2025-03-31 00:00:00" (pandas Timestamp str)
+    - "2025-03-31T00:00:00" (ISO datetime)
+    - "2025-03-31T00:00:00+00:00" (ISO with tz)
+    """
+
+    s = str(value).strip()
+    match = _DATE_PREFIX_RE.match(s)
+    if match:
+        return match.group(1)
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"invalid date format: {value!r}; expected YYYY-MM-DD (optionally with a time component)",
+    )
 
 
 def get_surprise_for_date(
     db: SQLiteDatabase, ticker: str, trailing_eps: float, forward_eps: float, date: str
 ) -> float:
+    date = normalize_date_str(date)
     surprise = calc_surprise_of_ticker(trailing_eps, forward_eps)
     upsert_eps_data_of_ticker(db, ticker, date, trailing_eps, forward_eps)
     upsert_surprise_data(db, ticker, date, surprise)
@@ -37,13 +63,14 @@ def get_reaction_for_date(
     cur_filing_date: str,
     cur_date: Optional[str],
 ) -> Optional[FilingDateValues[float]]:
-    if cur_date is not None and (
-        cur_filing_date > cur_date
-        or datetime.strptime(cur_date, "%Y-%m-%d")
-        - datetime.strptime(cur_filing_date, "%Y-%m-%d")
-        > timedelta(days=3)
-    ):
-        return None
+    cur_filing_date = normalize_date_str(cur_filing_date)
+    cur_date = normalize_date_str(cur_date) if cur_date is not None else None
+
+    if cur_date is not None:
+        filing_dt = datetime.strptime(cur_filing_date, "%Y-%m-%d")
+        date_dt = datetime.strptime(cur_date, "%Y-%m-%d")
+        if filing_dt > date_dt or (date_dt - filing_dt) > timedelta(days=3):
+            return None
 
     cached = get_ticker_reaction(db, ticker, filing_date=cur_filing_date, date=cur_date)
     if cached is not None:

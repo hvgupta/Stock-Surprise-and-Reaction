@@ -17,7 +17,11 @@ from app.sql_functions import (
     ticker_in_db,
     upsert_earnings_calendar_rows,
 )
-from app.helper_functions import get_reaction_for_date, get_surprise_for_date
+from app.helper_functions import (
+    get_reaction_for_date,
+    get_surprise_for_date,
+    normalize_date_str,
+)
 
 logger = get_configured_logger(__name__)
 
@@ -53,6 +57,9 @@ async def fetch_surprise_for_ticker(
     request: Request, ticker: str, date: str | None = Query(default=None)
 ):
     db_conn = cast(SQLiteDatabase, request.app.state.database)
+
+    if date is not None:
+        date = normalize_date_str(date)
 
     surprise = get_ticker_surprise(db_conn, ticker, date)
     logger.info(f"Fetched surprise for {ticker} on {date}: {surprise}")
@@ -96,10 +103,12 @@ async def fetch_surprise_for_ticker(
         )
         if trailing_eps is None or forward_eps is None:
             continue
+
+        normalized_row_date = normalize_date_str(str(row_date))
         surprise = get_surprise_for_date(
-            db_conn, ticker, trailing_eps, forward_eps, str(row_date)
+            db_conn, ticker, trailing_eps, forward_eps, normalized_row_date
         )
-        date_to_surprise[str(row_date)] = surprise
+        date_to_surprise[normalized_row_date] = surprise
 
     if date is not None:
         return {"ticker": ticker, "surprise": {date: date_to_surprise.get(date)}}
@@ -113,8 +122,16 @@ async def fetch_reaction_for_ticker(
     num_days = reaction_request.num_day_return
     threshold = reaction_request.threshold
     market_index = reaction_request.market_index
-    filing_date = reaction_request.filing_date
-    date = reaction_request.date
+    filing_date = (
+        normalize_date_str(reaction_request.filing_date)
+        if reaction_request.filing_date is not None
+        else None
+    )
+    date = (
+        normalize_date_str(reaction_request.date)
+        if reaction_request.date is not None
+        else None
+    )
 
     surprise = await fetch_surprise_for_ticker(request, ticker, filing_date)
     valid_dates: List[str] = [

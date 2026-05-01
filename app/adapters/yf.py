@@ -7,6 +7,7 @@ import yfinance as yf
 from pandas import Series
 from typing import Optional
 from datetime import datetime, timedelta
+import re
 
 
 def _ceil_working_day(date: datetime, inc: bool) -> datetime:
@@ -26,6 +27,14 @@ def _normalize_date_str(date: str) -> str:
     if len(date) == 10 and date[4] == "-" and date[7] == "-":
         return date
 
+    # If the string starts with a date, keep only the date portion.
+    # Handles common pandas/ISO variants like:
+    #   "YYYY-MM-DD 00:00:00", "YYYY-MM-DDT00:00:00",
+    #   "YYYY-MM-DDT00:00:00.000000000", "YYYY-MM-DDT00:00:00Z"
+    match = re.match(r"^(\d{4}-\d{2}-\d{2})", date)
+    if match:
+        return match.group(1)
+
     candidate = date
     # Handle trailing Z (UTC) for fromisoformat
     if candidate.endswith("Z"):
@@ -35,10 +44,8 @@ def _normalize_date_str(date: str) -> str:
         dt = datetime.fromisoformat(candidate)
         return dt.date().isoformat()
     except ValueError:
-        # Common pandas string form: "YYYY-MM-DD HH:MM:SS"
-        # If there are extra parts, keep only the date token.
-        token = date.split()[0]
-        dt = datetime.strptime(token, "%Y-%m-%d")
+        # Last resort: attempt to interpret whatever remains as a date.
+        dt = datetime.strptime(date, "%Y-%m-%d")
         return dt.date().isoformat()
 
 
@@ -67,7 +74,7 @@ def get_1d_return_of_ticker(ticker: str, date: str) -> Optional[float]:
     start_date = date
     end_date = _ceil_working_day(
         datetime.fromisoformat(date) + timedelta(days=2), inc=True
-    ).isoformat()
+    ).strftime("%Y-%m-%d")
 
     try:
         # Get data including the target date

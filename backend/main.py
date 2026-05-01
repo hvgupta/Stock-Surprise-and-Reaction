@@ -13,7 +13,6 @@ from backend.sql_functions import (
     get_all_supported_tickers,
     get_dates_of_ticker,
     get_ticker_proportionality_data,
-    get_ticker_reaction,
     get_ticker_surprise,
     ticker_in_db,
     upsert_proportionality_model,
@@ -59,7 +58,9 @@ async def _compute_sector_proportionality_model(
             logger.error(f"Error fetching surprise for {ticker}: {e}")
             return
 
-        surprise_data = surprise_resp.get("surprise") if isinstance(surprise_resp, dict) else None
+        surprise_data = (
+            surprise_resp.get("surprise") if isinstance(surprise_resp, dict) else None
+        )
         if not isinstance(surprise_data, dict) or not surprise_data:
             return
 
@@ -74,17 +75,21 @@ async def _compute_sector_proportionality_model(
                     request,
                     ticker,
                     ReactionRequest(
-                        num_day_return=3,
+                        reaction_days_threshold=3,
                         market_index="SPY",
-                        threshold=0.0,
+                        surprise_threshold=0.0,
                         filings_date=filing_date_norm,
-                        date=None,
+                        reaction_date=None,
                     ),
                 )
             except Exception:
                 continue
 
-            reaction_data = reaction_resp.get("reaction_data") if isinstance(reaction_resp, dict) else None
+            reaction_data = (
+                reaction_resp.get("reaction_data")
+                if isinstance(reaction_resp, dict)
+                else None
+            )
             if not isinstance(reaction_data, dict):
                 continue
 
@@ -142,7 +147,6 @@ async def _compute_sector_proportionality_model(
                 reaction = get_reaction_for_date(
                     db,
                     ticker,
-                    3,
                     "SPY",
                     filing_date_norm,
                     None,
@@ -208,30 +212,32 @@ async def get_filing_dates_for_ticker(request: Request, ticker: str):
 
 
 async def fetch_surprise_for_ticker(
-    request: Request, ticker: str, date: str | None = Query(default=None)
+    request: Request, ticker: str, filing_date: str | None = Query(default=None)
 ) -> SurpriseEndpointResponse:
     db_conn = cast(SQLiteDatabase, request.app.state.database)
 
-    if date is not None:
-        date = normalize_date_str(date)
+    if filing_date is not None:
+        filing_date = normalize_date_str(filing_date)
 
-    surprise = get_ticker_surprise(db_conn, ticker, date)
-    logger.info(f"Fetched surprise for {ticker} on {date}: {surprise}")
+    surprise = get_ticker_surprise(db_conn, ticker, filing_date)
+    logger.info(f"Fetched surprise for {ticker} on {filing_date}: {surprise}")
     if surprise is not None:
         logger.info(
-            f"Surprise data found in database for {ticker} on {date}, returning cached value"
+            f"Surprise data found in database for {ticker} on {filing_date}, returning cached value"
         )
         return {
             "ticker": ticker,
             "surprise": (
-                surprise if isinstance(surprise, Dict) else {str(date): float(surprise)}
+                surprise
+                if isinstance(surprise, Dict)
+                else {str(filing_date): float(surprise)}
             ),
         }
 
     if ticker_in_db(db_conn, ticker) is True:
         raise HTTPException(
             status_code=404,
-            detail=f"surprise data not found for ticker {ticker} on date {date}, even though the ticker exists in the database, likely means that the date is not supported for this ticker",
+            detail=f"surprise data not found for ticker {ticker} on date {filing_date}, even though the ticker exists in the database, likely means that the date is not supported for this ticker",
         )
 
     eps_data = get_earnings_history_of_ticker(ticker)
@@ -244,7 +250,7 @@ async def fetch_surprise_for_ticker(
     if len(eps_data) == 0:
         raise HTTPException(
             status_code=404,
-            detail=f"EPS data incomplete for ticker {ticker} on {date}",
+            detail=f"EPS data incomplete for ticker {ticker} on {filing_date}",
         )
 
     date_to_surprise: Dict[str, float] = {}
@@ -266,8 +272,11 @@ async def fetch_surprise_for_ticker(
         )
         date_to_surprise[normalized_row_date] = surprise
 
-    if date is not None:
-        return {"ticker": ticker, "surprise": {date: date_to_surprise[date]}}
+    if filing_date is not None:
+        return {
+            "ticker": ticker,
+            "surprise": {filing_date: date_to_surprise[filing_date]},
+        }
 
     return {"ticker": ticker, "surprise": date_to_surprise}
 
@@ -275,49 +284,57 @@ async def fetch_surprise_for_ticker(
 async def fetch_reaction_for_ticker(
     request: Request, ticker: str, reaction_request: ReactionRequest = Depends()
 ):
-    num_days = reaction_request.num_day_return
-    threshold = reaction_request.threshold
+    surprise_threshold = reaction_request.surprise_threshold
     market_index = reaction_request.market_index
+
     filing_date = (
         normalize_date_str(reaction_request.filings_date)
         if reaction_request.filings_date is not None
         else None
     )
-    date = (
-        normalize_date_str(reaction_request.date)
-        if reaction_request.date is not None
+    reaction_date = (
+        normalize_date_str(reaction_request.reaction_date)
+        if reaction_request.reaction_date is not None
         else None
     )
 
     surprise = await fetch_surprise_for_ticker(request, ticker, filing_date)
-    valid_dates: List[str] = [
+    valid_filings_date: List[str] = [
         date
         for date, surprise in surprise["surprise"].items()
-        if surprise is not None and abs(surprise) >= threshold
+        if surprise is not None and abs(surprise) >= surprise_threshold
     ]
 
-    if len(valid_dates) == 0:
+    if len(valid_filings_date) == 0:
         raise HTTPException(
             status_code=400,
-            detail=f"the surprise value {surprise['surprise']} for ticker {ticker} is below the threshold of {threshold}, so reaction is not calculated",
+            detail=f"the surprise value {surprise['surprise']} for ticker {ticker} is below the threshold of {surprise_threshold}, so reaction is not calculated",
         )
 
     db = cast(SQLiteDatabase, request.app.state.database)
 
     date_to_reaction_data: Dict[str, Dict[str, Any]] = {}
 
-    for filing_date in valid_dates:
+    for filing_date in valid_filings_date:
         try:
             reaction = get_reaction_for_date(
-                db, ticker, num_days, market_index, filing_date, date
+                db,
+                ticker,
+                market_index,
+                filing_date,
+                reaction_date,
+                reaction_request.reaction_days_threshold,
             )
             if reaction is None:
                 continue
 
-            date_to_reaction_data[filing_date] = {
+            logger.info(f"the reaction is {reaction}")
+            
+            date_to_reaction_data[filing_date] ={
                 "reaction": reaction[filing_date],
                 "surprise": surprise["surprise"][filing_date],
             }
+        
         except HTTPException as e:
             logger.error(
                 f"Error calculating reaction for {ticker} on {filing_date}: {e.detail}"
@@ -343,9 +360,9 @@ async def fetch_proportionate_for_ticker(
         if proportionate_request.filings_date is not None
         else None
     )
-    date = (
-        normalize_date_str(proportionate_request.date)
-        if proportionate_request.date is not None
+    reaction_date = (
+        normalize_date_str(proportionate_request.reaction_date)
+        if proportionate_request.reaction_date is not None
         else None
     )
 
@@ -355,7 +372,9 @@ async def fetch_proportionate_for_ticker(
 
     if filings_date is not None:
         surprise_data = await fetch_surprise_for_ticker(request, ticker, filings_date)
-        surprise_map = surprise_data.get("surprise") if isinstance(surprise_data, dict) else None
+        surprise_map = (
+            surprise_data.get("surprise") if isinstance(surprise_data, dict) else None
+        )
         if not isinstance(surprise_map, dict) or filings_date not in surprise_map:
             raise HTTPException(
                 status_code=404,
@@ -369,6 +388,7 @@ async def fetch_proportionate_for_ticker(
     ticker_sector: str = SP500_COMPANIES[SP500_COMPANIES["Symbol"] == ticker][
         "GICS Sector"
     ].values[0]
+
     proportionality_data = get_ticker_proportionality_data(
         cast(SQLiteDatabase, request.app.state.database), ticker_sector
     )
@@ -386,17 +406,18 @@ async def fetch_proportionate_for_ticker(
     surpirse_mean, surprise_sd, alpha, beta = proportionality_data
     surprise_z_score = (surprise_value - surpirse_mean) / (surprise_sd + 1e-9)
     expected_CAR = alpha + beta * surprise_z_score
+    # 
 
     if filings_date is not None:
         reaction_response = await fetch_reaction_for_ticker(
             request,
             ticker,
             ReactionRequest(
-                num_day_return=3,
+                reaction_days_threshold=3,
                 market_index="SPY",
-                threshold=0.0,
+                surprise_threshold=0.0,
                 filings_date=filings_date,
-                date=date,
+                reaction_date=reaction_date,
             ),
         )
 
@@ -409,13 +430,13 @@ async def fetch_proportionate_for_ticker(
 
         reaction_series = filing_entry.get("reaction")
         if isinstance(reaction_series, dict):
-            if date is not None:
-                if date not in reaction_series:
+            if reaction_date is not None:
+                if reaction_date not in reaction_series:
                     raise HTTPException(
                         status_code=404,
-                        detail=f"reaction not available for {ticker} on {date} (filings_date={filings_date})",
+                        detail=f"reaction not available for {ticker} on {reaction_date} (filings_date={filings_date})",
                     )
-                actual_CAR = float(reaction_series[date])
+                actual_CAR = float(reaction_series[reaction_date])
             else:
                 last_date = sorted(reaction_series.keys())[-1]
                 actual_CAR = float(reaction_series[last_date])

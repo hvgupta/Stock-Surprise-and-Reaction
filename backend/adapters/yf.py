@@ -66,18 +66,23 @@ def get_earnings_history_of_ticker(ticker: str) -> Optional[pd.DataFrame]:
 
 
 def get_1d_return_of_ticker(ticker: str, date: str) -> Optional[float]:
+    """
+        returns in this case is defined as the returns from date-1d("closing") to date("closing")
+    """
     logger.info(f"Fetching 1-day return for {ticker} on {date}")
     yf_ticker = yf.Ticker(ticker)
 
     date = _normalize_date_str(date)
 
-    start_date = date
+    start_date = _ceil_working_day(
+        datetime.fromisoformat(date) - timedelta(days=1), inc=False
+    ).strftime("%Y-%m-%d")
     end_date = _ceil_working_day(
-        datetime.fromisoformat(date) + timedelta(days=2), inc=True
+        datetime.fromisoformat(date) + timedelta(days=1), inc=True
     ).strftime("%Y-%m-%d")
 
     try:
-        # Get data including the target date
+        # Get data including the target date 
         hist = yf_ticker.history(start=start_date, end=end_date)
     except Exception as e:
         logger.error(f"Error fetching 1-day return for {ticker} on {date}: {e}")
@@ -88,6 +93,7 @@ def get_1d_return_of_ticker(ticker: str, date: str) -> Optional[float]:
         return None
 
     closing_prices: Series[float] = hist["Close"]
+    logger.info(f"Closing prices for {ticker} from {start_date} to {end_date}: {closing_prices.to_dict()}")
     return float(
         (closing_prices.iloc[-1] - closing_prices.iloc[0]) / closing_prices.iloc[0]
     )

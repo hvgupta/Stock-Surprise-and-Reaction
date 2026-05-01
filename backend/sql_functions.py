@@ -137,20 +137,20 @@ def is_date_supported_for_ticker(db: SQLiteDatabase, ticker: str, date: str) -> 
 
 @overload
 def get_ticker_surprise(
-    db: SQLiteDatabase, ticker: str, date: str
+    db: SQLiteDatabase, ticker: str, filing_date: str
 ) -> Optional[float]: ...
 
 
 @overload
 def get_ticker_surprise(
-    db: SQLiteDatabase, ticker: str, date: None = None
+    db: SQLiteDatabase, ticker: str, filing_date: None = None
 ) -> Optional[Dict[str, float]]: ...
 
 
 def get_ticker_surprise(
-    db: SQLiteDatabase, ticker: str, date: Optional[str] = None
+    db: SQLiteDatabase, ticker: str, filing_date: Optional[str] = None
 ) -> Optional[DateValues[float]]:
-    if date is not None:
+    if filing_date is not None:
         rows = db.execute(
             """
             SELECT surprise
@@ -158,7 +158,7 @@ def get_ticker_surprise(
             WHERE symbol = ? AND date = ?
             LIMIT 1
             """,
-            (ticker, date),
+            (ticker, filing_date),
         )
         return rows[0][0] if rows else None
 

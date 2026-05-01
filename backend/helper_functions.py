@@ -20,7 +20,6 @@ from fastapi import HTTPException
 from datetime import datetime, timedelta
 import re
 
-
 _DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
 
@@ -58,18 +57,22 @@ def get_surprise_for_date(
 def get_reaction_for_date(
     db: SQLiteDatabase,
     ticker: str,
-    num_days: int,
     market_index: str,
     cur_filing_date: str,
     cur_date: Optional[str],
+    reaction_days_threshold: int = 3,
 ) -> Optional[FilingDateValues[float]]:
-    cur_filing_date = normalize_date_str(cur_filing_date)
+    cur_filing_date = normalize_date_str(
+        cur_filing_date
+    )  # YYYY-MM-DD , YYYY-MM-DD HH:MM:SS, ISO format
     cur_date = normalize_date_str(cur_date) if cur_date is not None else None
 
     if cur_date is not None:
         filing_dt = datetime.strptime(cur_filing_date, "%Y-%m-%d")
-        date_dt = datetime.strptime(cur_date, "%Y-%m-%d")
-        if filing_dt > date_dt or (date_dt - filing_dt) > timedelta(days=3):
+        reaction_date_dt = datetime.strptime(cur_date, "%Y-%m-%d")
+        if filing_dt > reaction_date_dt or (reaction_date_dt - filing_dt) > timedelta(
+            days=reaction_days_threshold
+        ):
             return None
 
     cached = get_ticker_reaction(db, ticker, filing_date=cur_filing_date, date=cur_date)
@@ -84,10 +87,11 @@ def get_reaction_for_date(
 
     filings_data: FilingDateValues[float] = {cur_filing_date: {}}
 
-    for n in range(1, num_days + 1):
+    for n in range(1, 1 + reaction_days_threshold):
         insert_date = (
             datetime.strptime(cur_filing_date, "%Y-%m-%d") + timedelta(days=n)
         ).strftime("%Y-%m-%d")
+
         one_day_return = get_1d_return_of_ticker(ticker, insert_date)
         if one_day_return is None:
             raise HTTPException(
@@ -103,9 +107,14 @@ def get_reaction_for_date(
             )
         market_cumulative_return += market_n_day_return
 
+        logger.info(
+            f"for ticker {ticker} on filing date {cur_filing_date}, day {n} return is {one_day_return}, cumulative return is {ticker_cumulative_return}; for market index {market_index}, day {n} return is {market_n_day_return}, cumulative return is {market_cumulative_return}"
+        )
+
         reaction = calc_reaction_of_ticker(
             ticker_cumulative_return, market_cumulative_return
         )
+
         upsert_reaction_data(db, ticker, cur_filing_date, insert_date, reaction)
         filings_data[cur_filing_date][insert_date] = reaction
 
@@ -113,7 +122,7 @@ def get_reaction_for_date(
         # If the requested date is not within the num_days window, calculate reaction up to that date
         raise HTTPException(
             status_code=400,
-            detail=f"the requested date {cur_date} is outside the num_days window of {num_days} days from the filing date {cur_filing_date}, cannot calculate reaction",
+            detail=f"the requested date {cur_date} is outside the num_days window of 3 days from the filing date {cur_filing_date}, cannot calculate reaction",
         )
     elif cur_date is not None:
         return {cur_filing_date: {cur_date: filings_data[cur_filing_date][cur_date]}}

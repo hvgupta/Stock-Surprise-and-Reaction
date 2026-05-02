@@ -19,10 +19,10 @@ Get the _Proportionality_ of the _Reaction_. This part of the question askes, if
 
 This will give us the percentage difference, and could be any real number. Therefore to reduce the noise in data, a customizable variable `SURPRISE_THRESHOLD` will be set (currently set to 0.03).
 
-If $|$`raw_surprise`$|\ge$ `SURPRISE_THRESHOLD`, then it is returned for the ticker 
+If |`raw_surprise`|$\ge$ `SURPRISE_THRESHOLD`, then it is returned for the ticker 
 
 ### Reaction
-If $|$`raw_surprise`$|\ge$ `SURPRISE_THRESHOLD`, then reaction is calulated
+If |`raw_surprise`|$\ge$ `SURPRISE_THRESHOLD`, then reaction is calulated
 
 Reaction is defined as 
 $\text{Reaction}(\text{days from earnings report}) \\ =R_\text{ticker}(\text{days from earnings report}) - R_\text{market}(\text{days from earnings report})$

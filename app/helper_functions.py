@@ -1,4 +1,4 @@
-from backend.sql_functions import (
+from app.sql_functions import (
     SQLiteDatabase,
     FilingDateValues,
     get_ticker_reaction,
@@ -6,8 +6,8 @@ from backend.sql_functions import (
     upsert_surprise_data,
     upsert_eps_data_of_ticker,
 )
-from backend.logger import get_configured_logger
-from backend.adapters import (
+from app.logger import get_configured_logger
+from app.adapters import (
     get_1d_return_of_ticker,
     calc_reaction_of_ticker,
     calc_surprise_of_ticker,

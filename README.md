@@ -1,66 +1,90 @@
-# Oxbow — Stock Surprise & Reaction
+# Stock-Surprise-and-Reaction
+Created by [Harsh Vardhan Gupta](https://github.com/hvgupta)
 
-This directory contains the API and analysis code for measuring earnings surprises and market reactions for S&P 500 companies.
+## Quick Start
 
-## Quick: how to read the code
+### 1. Install UV itself
 
-- **Activate the project environment** (from the repository root):
+If `uv` is not already installed on your machine, install it with Python first:
+
+#### macOS / Linux
 
 ```bash
-source .venv/bin/activate
+python3 -m pip install uv
 ```
 
-- **Install dependencies**
+#### Windows PowerShell
 
-```bash
-# If you use Poetry:
-poetry install
-
-# Or, if there's a requirements file:
-pip install -r requirements.txt
-
-# As an alternative editable install:
-pip install -e .
+```powershell
+py -m pip install uv
 ```
 
-- **Key files to inspect (in priority order)**
-
-- `backend/app.py` — API route declarations and request/response wiring.
-- `backend/main.py` — API entrypoint and server startup (how the service is launched).
-- `backend/helper_functions.py` — utility helpers used by the API.
-- `backend/model.py` — statistical logic (surprise, reaction, proportionality models).
-- `backend/sql_functions.py` — persistence layer for `markets.db`.
-- `backend/logger.py` — logging configuration.
-- `adapters/` — data source wrappers:
-	- `yf.py` — Yahoo Finance helper functions (price, EPS, returns).
-	- `SP500_companies.py` — scraper for the S&P 500 constituents.
-	- `financials.py` — any additional financial adapters.
-
-- **Notebooks & examples**
-
-- `test.ipynb` (repo root) and `oxbow/test.ipynb` contain exploratory analysis and example usage of the functions.
-
-## Running the API locally
-
-From the `oxbow/` directory, start a development server (example using `uvicorn`):
+### 2. Clone the repository
 
 ```bash
-uvicorn backend.app:app --reload --port 8000
+git clone https://github.com/hvgupta/Stock-Surprise-and-Reaction.git
+cd Stock-Surprise-and-Reaction
 ```
 
-Then you can call endpoints (examples):
+### 3. Install the project with UV
+
+#### macOS / Linux
 
 ```bash
-# Surprise for a ticker (most recent if date omitted)
+uv sync
+```
+
+#### Windows PowerShell
+
+```powershell
+uv sync
+```
+
+If you want to create the environment explicitly first, UV can do that too:
+
+```bash
+uv venv
+```
+
+### 4. Run the application
+
+```bash
+uv run fastapi run app/app.py
+```
+
+## How to use the API
+
+### Browser UI
+
+Open the Swagger docs in your browser:
+
+```text
+http://0.0.0.0:8000/docs
+```
+
+### cURL examples
+
+```bash
+# Surprise for a ticker (most recent if date is omitted)
 curl "http://localhost:8000/AAPL/surprise?date=2024-10-25"
 
 # Reaction / CAR example
 curl "http://localhost:8000/AAPL/reaction?filings_date=2024-10-25&reaction_days_threshold=3"
 ```
 
-## How to navigate the logic
+To install a development dependency, use the same command with the package name you need for local work.
 
-- Start at `backend/app.py` to see how endpoints map to functions.
-- Follow the handler to `backend/model.py` for calculation details (surprise calculation, z-score, regression).
-- Check `adapters/yf.py` to see how data is sourced and any caveats about data availability or rate limits.
-- Use `backend/sql_functions.py` to understand caching and where intermediate results are stored.
+## How to read the code
+
+Start with the files below in this order:
+
+1. `app/app.py` - API routes and request handling.
+2. `app/model.py` - surprise, reaction, and proportionality logic.
+3. `app/helper_functions.py` - shared helper utilities.
+4. `app/sql_functions.py` - database and caching code.
+5. `app/adapters/` - external data sources such as Yahoo Finance and S&P 500 company data.
+
+## Notes
+
+- The `/docs` page is the easiest way to explore available endpoints.
+- If a command fails on Windows, run it from the same PowerShell session where you used `uv sync` or `uv venv`.

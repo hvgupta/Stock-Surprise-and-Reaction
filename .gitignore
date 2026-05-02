@@ -17,3 +17,5 @@ app.log
 **.db**
 
 **.next
+
+**.venv

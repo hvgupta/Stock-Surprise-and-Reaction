@@ -25,16 +25,11 @@ If $|$`raw_surprise`$|\ge$ `SURPRISE_THRESHOLD`, then it is returned for the tic
 If $|$`raw_surprise`$|\ge$ `SURPRISE_THRESHOLD`, then reaction is calulated
 
 Reaction is defined as 
-$$
-\begin{aligned}
-    \text{Reaction}&(\text{days\_from\_earnings\_report}) \\ 
-    &=R_\text{ticker}(\text{days\_from\_earnings\_report}) - R_\text{market}(\text{days\_from\_earnings\_report})
-\end{aligned}
-$$
+$\text{Reaction}(\text{days from earnings report}) \\ =R_\text{ticker}(\text{days from earnings report}) - R_\text{market}(\text{days from earnings report})$
 
 Where 
-- $R_\text{ticker}(\text{days\_from\_earnings\_report})$ is defined as the returns from the company's stock from the closing price of the day the earnings report was published.
-- $R_\text{market}(\text{days\_from\_earnings\_report})$ follows the same logic.
+- $R_\text{ticker}(\text{days from earnings report})$ is defined as the returns from the company's stock from the closing price of the day the earnings report was published.
+- $R_\text{market}(\text{days from earnings report})$ follows the same logic.
 
 Essentially, the assumption here is that the impact of _Surpise_ over-powers any other factors over the `days_from_earnings_report` period
 

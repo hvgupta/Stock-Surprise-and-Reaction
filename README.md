@@ -95,3 +95,4 @@ All endpoints return JSON. Errors use standard HTTP status codes with a `detail`
 ## Possible improvments to the project
 - The calculation of reaction currently does not consider public holidays (but weekends are considered). Although this would be reletively simple fix as the `_round_to_working_day` function can be updated to include that information, but the process is time consuming and would lead to bruteforce
 - Another improvment that can be made is the access to more hisotrical data, as the model being used does not have many data points to get a full understanding of the model.
+- Improvement to the model: the model is a simple linear regression model and may not be able to solve for cases where relationship is not linear

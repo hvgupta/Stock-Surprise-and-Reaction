@@ -2,13 +2,13 @@ from fastapi import Query
 from pydantic import BaseModel, model_validator
 from typing import Dict, Optional, TypedDict, Union
 
-DEFAULT_THRESHOLD = 0.03
+SURPRISE_THRESHOLD = 0.03
 
 
 class ReactionRequest(BaseModel):
     reaction_days_threshold: int = Query(default=1, ge=1, lt=4)
     market_index: str = Query(default="SPY")
-    surprise_threshold: float = Query(default=DEFAULT_THRESHOLD)
+    surprise_threshold: float = Query(default=SURPRISE_THRESHOLD)
     filings_date: Optional[str] = Query(default=None)
     reaction_date: Optional[str] = Query(default=None)
 

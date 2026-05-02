@@ -45,6 +45,20 @@ This will give us the percentage difference between the expected reaction and th
 The reason why I have choose to use a linear regression is because it is reletively simple to implement and test in the time period provided to me.
 
 ## Code functionality
+### Core Algorithms & Formulas
+
+| # | Name | Formula | Output |
+|---|------|---------|--------|
+| 1 | EPS Surprise | `(epsEstimate − epsActual) / \|epsActual\|` | Dimensionless ratio; negative = beat |
+| 2 | Daily Return | `(Close[n] − Close[n−1]) / Close[n−1]` | Fraction of price change in one day |
+| 3 | Cumulative Return | `Σ daily_return[i]` over window | Total return across N days |
+| 4 | CAR (reaction) | `cumulative_ticker_return − cumulative_market_return` | Abnormal return vs. benchmark |
+| 5 | Z-Score of Surprise | `(surprise − μ_sector) / σ_sector` | Sector-normalised surprise |
+| 6 | Expected CAR | `α + β × z_score` | Sector model prediction |
+| 7 | Proportionality | `(actual_CAR − expected_CAR) / \|expected_CAR\|` | Over/under-reaction vs. sector norm |
+
+The regression coefficients `α` and `β` are fitted with `numpy.polyfit(z_scores, cars, deg=1)` using population standard deviation (`ddof=0`). The model requires a minimum of **12** (surprise, CAR) pairs and collects up to **60** pairs per sector before fitting.
+
 ### Technology Stack
 
 | Layer | Technology | Purpose |
@@ -76,14 +90,9 @@ The reason why I have choose to use a linear regression is because it is reletiv
 | Endpoint | Method | Key Parameters | Description |
 |----------|--------|---------------|-------------|
 | `/health` | GET | — | Liveness check |
-| `/supported_tickers` | GET | — | All tickers with cached earnings data |
-| `/{ticker}/dates` | GET | — | All earnings filing dates for a ticker |
 | `/{ticker}/surprise` | GET | `date` (YYYY-MM-DD, optional) | Surprise % for a filing date; omit date for most recent |
 | `/{ticker}/reaction` | GET | `filings_date`, `reaction_date`, `reaction_days_threshold` (1–3), `market_index`, `surprise_threshold` | CAR over the reaction window |
 | `/{ticker}/proportionate` | GET | `filings_date` + `reaction_date` OR `surprise` + `cumalative_reaction` | Expected vs. actual CAR and proportionality ratio |
-| `/{ticker}/pe` | GET | — | Trailing and forward P/E ratios |
-| `/{ticker}/earnings_last` | GET | — | Most recent earnings date |
-| `/{ticker}/history` | GET | `start`, `end` (YYYY-MM-DD) | OHLCV price history |
 
 All endpoints return JSON. Errors use standard HTTP status codes with a `detail` field.
 

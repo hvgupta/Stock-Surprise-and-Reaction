@@ -1,11 +1,4 @@
-from backend.adapters import (
-    SP500_COMPANIES,
-    fetch_ticker_historical_prices,
-    get_current_forward_pe_of_ticker,
-    get_current_pe_of_ticker,
-    get_earnings_history_of_ticker,
-    get_last_earnings_call_of_ticker,
-)
+from backend.adapters import SP500_COMPANIES, get_earnings_history_of_ticker
 from backend.logger import get_configured_logger
 from backend.model import (
     PropotionateRequest,
@@ -15,8 +8,6 @@ from backend.model import (
 )
 from backend.sql_functions import (
     SQLiteDatabase,
-    get_all_supported_tickers,
-    get_dates_of_ticker,
     get_ticker_proportionality_data,
     get_ticker_surprise,
     ticker_in_db,
@@ -198,24 +189,6 @@ async def health_check():
     return {"status": "ok"}
 
 
-async def get_supported_tickers(request: Request):
-    all_tickers = get_all_supported_tickers(
-        cast(SQLiteDatabase, request.app.state.database)
-    )
-    return {"tickers": all_tickers, "count": len(all_tickers)}
-
-
-async def get_filing_dates_for_ticker(request: Request, ticker: str):
-    db_conn = cast(SQLiteDatabase, request.app.state.database)
-    filing_dates = get_dates_of_ticker(db_conn, ticker)
-    if not filing_dates:
-        raise HTTPException(
-            status_code=404,
-            detail=f"filing dates not found for ticker {ticker}",
-        )
-    return {"ticker": ticker, "filing_dates": filing_dates}
-
-
 async def fetch_surprise_for_ticker(
     request: Request, ticker: str, filing_date: str | None = Query(default=None)
 ) -> SurpriseEndpointResponse:
@@ -355,7 +328,7 @@ async def fetch_reaction_for_ticker(
     }
 
 
-async def fetch_proportionate_for_ticker(
+async def fetch_proportionality_for_ticker(
     request: Request,
     ticker: str,
     proportionate_request: PropotionateRequest = Depends(),
@@ -437,7 +410,6 @@ async def fetch_proportionate_for_ticker(
         f"Computed proportionality for {ticker}: expected_CAR={expected_CAR}, actual_CAR={actual_CAR}"
     )
 
-
     if isinstance(actual_CAR, (int, float)):
         pct_diff_from_expected = (
             None
@@ -456,51 +428,13 @@ async def fetch_proportionate_for_ticker(
         if isinstance(reaction, str):
             continue
         pct_diff_from_expected_map[date] = {
-            "pct_diff_from_expected": None if abs(expected_CAR) < 1e-12 else (reaction - expected_CAR) / expected_CAR,
+            "pct_diff_from_expected": (
+                None
+                if abs(expected_CAR) < 1e-12
+                else (reaction - expected_CAR) / expected_CAR
+            ),
             "expected_CAR": expected_CAR,
             "actual_CAR": reaction,
         }
-    
+
     return pct_diff_from_expected_map
-
-
-async def ticker_pe(ticker: str):
-    """Return current trailing and forward P/E ratios for a ticker."""
-    trailing = get_current_pe_of_ticker(ticker)
-    forward = get_current_forward_pe_of_ticker(ticker)
-
-    if trailing is None and forward is None:
-        raise HTTPException(status_code=404, detail=f"P/E data not found for {ticker}")
-
-    return {"ticker": ticker, "pe": trailing, "forward_pe": forward}
-
-
-async def ticker_last_earnings(ticker: str):
-    """Return the last earnings call date for a ticker (YYYY-MM-DD)."""
-    last = get_last_earnings_call_of_ticker(ticker)
-    if last is None:
-        raise HTTPException(
-            status_code=404, detail=f"No earnings date found for {ticker}"
-        )
-    return {"ticker": ticker, "last_earnings_date": last}
-
-
-async def ticker_history(ticker: str, start: str, end: str):
-    """Return historical OHLCV data for a ticker between start and end dates.
-
-    Dates must be in YYYY-MM-DD format.
-    """
-    try:
-        df = await fetch_ticker_historical_prices(ticker, start, end)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error fetching history for {ticker}: {e}")
-        raise HTTPException(status_code=500, detail="Error fetching historical prices")
-
-    # Convert Date to ISO string for JSON serialization
-    df = df.copy()
-    if "Date" in df.columns:
-        df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
-
-    return {"ticker": ticker, "data": df.to_dict(orient="records")}

@@ -29,11 +29,6 @@ app = FastAPI(lifespan=lifespan)
 from . import main as handlers
 
 app.get("/health")(handlers.health_check)
-app.get("/supported_tickers")(handlers.get_supported_tickers)
-app.get("/{ticker}/dates")(handlers.get_filing_dates_for_ticker)
 app.get("/{ticker}/surprise")(handlers.fetch_surprise_for_ticker)
 app.get("/{ticker}/reaction")(handlers.fetch_reaction_for_ticker)
-app.get("/{ticker}/proportionate")(handlers.fetch_proportionate_for_ticker)
-app.get("/{ticker}/pe")(handlers.ticker_pe)
-app.get("/{ticker}/earnings_last")(handlers.ticker_last_earnings)
-app.get("/{ticker}/history")(handlers.ticker_history)
+app.get("/{ticker}/proportionate")(handlers.fetch_proportionality_for_ticker)

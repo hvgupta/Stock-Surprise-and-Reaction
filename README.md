@@ -40,25 +40,58 @@ Essentially, the assumption here is that the impact of _Surpise_ over-powers any
 
 ### Proportionality
 In order to determine this, 
-A linear regression is set up, where the formula idea is basically $$\text{Reaction} = \text{intercept} + \beta\times\text{surprise-z-score}$$
+A linear regression is set up, where the formula idea is basically $$E[\text{Reaction}] = \text{intercept} + \beta\times\text{surprise-z-score}$$
 
 here `surprise-z-score` is just $$\frac{\text{surprise of ticker} - \mu_\text{surprise of companies in the same sector}}{\sigma_\text{surprise of the companies in the same sector}}$$
 
-## plan
+Finally if to know the _Reaction_ is proportional, we can just compute $$\frac{\text{Actual Reaction} - E[Reaction]}{|E[Reaction]|}$$
+This will give us the percentage difference between the expected reaction and the actual reaction, then finally we can define another configurable parameter `PROP_REACTION_THESHOLD`, then we can say that the reaction is Proportionate if |percentage diff| $\le$ `PROP_REACTION_THESHOLD`
 
-data storage
-- possible storage
-    - local files
-    - supabase
-    - sqllite3 -> the simpliest and most appropiate for this small project
+The reason why I have choose to use a linear regression is because it is reletively simple to implement and test in the time period provided to me.
 
-- might not be needed, since all the other functions dont really have a rate limit
+## Code functionality
+### Technology Stack
 
-## API notes (current)
-- Populate the DB (yfinance earnings history for S&P500): `POST /populate/sp500/earnings_calendar`
-    - Uses a concurrency limit via `batch_size` query param (default 10).
-    - Upserts all available earnings history rows into `earnings_calendar` keyed by `(symbol, date)`.
-- Surprise endpoint: `GET /{ticker}/surprise?date=YYYY-MM-DD` (date optional)
-    - If `date` is omitted, uses the most recent earnings date available in `earnings_calendar`.
-- Reaction endpoint: `GET /{ticker}/reaction?date=YYYY-MM-DD&num_day_return=...&market_index=...&threshold=...`
-    - Reaction is calculated starting from the same `date` used for the surprise.
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Web framework | FastAPI + uvicorn | Async HTTP API |
+| Data validation | Pydantic v2 | Request/response schema enforcement |
+| Stock data | yfinance | EPS history, price history, P/E ratios |
+| Numerics | numpy, pandas | Statistical calculations, regression |
+| Persistence | SQLite (`markets.db`) | Local cache for computed values |
+| HTML parsing | lxml | Scrape S&P 500 list from Wikipedia |
+
+### Data fetching functions
+
+**`yf.py`** — Yahoo Finance wrapper:
+
+| Function | Returns |
+|----------|---------|
+| `get_earnings_history_of_ticker(ticker)` | DataFrame with `epsActual`, `epsEstimate` indexed by date |
+| `get_1d_return_of_ticker(ticker, date)` | Single-day return as a float; uses `_ceil_working_day` to skip weekends/holidays |
+| `fetch_ticker_historical_prices(ticker, start, end)` | OHLCV DataFrame |
+| `get_current_pe_of_ticker(ticker)` | Trailing P/E from `yf.Ticker.info` |
+| `get_current_forward_pe_of_ticker(ticker)` | Forward P/E |
+| `get_last_earnings_call_of_ticker(ticker)` | Most recent earnings date |
+
+**`SP500_companies.py`** — scrapes Wikipedia's S&P 500 table, returning a DataFrame with `Symbol` and `GICS Sector` columns used to organise tickers by sector for the proportionality model.
+
+### API Reference
+
+| Endpoint | Method | Key Parameters | Description |
+|----------|--------|---------------|-------------|
+| `/health` | GET | — | Liveness check |
+| `/supported_tickers` | GET | — | All tickers with cached earnings data |
+| `/{ticker}/dates` | GET | — | All earnings filing dates for a ticker |
+| `/{ticker}/surprise` | GET | `date` (YYYY-MM-DD, optional) | Surprise % for a filing date; omit date for most recent |
+| `/{ticker}/reaction` | GET | `filings_date`, `reaction_date`, `reaction_days_threshold` (1–3), `market_index`, `surprise_threshold` | CAR over the reaction window |
+| `/{ticker}/proportionate` | GET | `filings_date` + `reaction_date` OR `surprise` + `cumalative_reaction` | Expected vs. actual CAR and proportionality ratio |
+| `/{ticker}/pe` | GET | — | Trailing and forward P/E ratios |
+| `/{ticker}/earnings_last` | GET | — | Most recent earnings date |
+| `/{ticker}/history` | GET | `start`, `end` (YYYY-MM-DD) | OHLCV price history |
+
+All endpoints return JSON. Errors use standard HTTP status codes with a `detail` field.
+
+## Possible improvments to the project
+- The calculation of reaction currently does not consider public holidays (but weekends are considered). Although this would be reletively simple fix as the `_round_to_working_day` function can be updated to include that information, but the process is time consuming and would lead to bruteforce
+- Another improvment that can be made is the access to more hisotrical data, as the model being used does not have many data points to get a full understanding of the model.

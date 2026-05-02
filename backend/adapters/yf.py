@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import re
 
 
-def _ceil_working_day(date: datetime, inc: bool) -> datetime:
+def _round_to_working_day(date: datetime, inc: bool) -> datetime:
     if date.weekday() == 5:  # Saturday
         date += timedelta(days=2) if inc else timedelta(days=-1)
     elif date.weekday() == 6:  # Sunday
@@ -74,10 +74,10 @@ def get_1d_return_of_ticker(ticker: str, date: str) -> Optional[float]:
 
     date = _normalize_date_str(date)
 
-    start_date = _ceil_working_day(
+    start_date = _round_to_working_day(
         datetime.fromisoformat(date) - timedelta(days=1), inc=False
     ).strftime("%Y-%m-%d")
-    end_date = _ceil_working_day(
+    end_date = _round_to_working_day(
         datetime.fromisoformat(date) + timedelta(days=1), inc=True
     ).strftime("%Y-%m-%d")
 

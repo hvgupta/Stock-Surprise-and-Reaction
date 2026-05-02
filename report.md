@@ -78,10 +78,6 @@ The regression coefficients `α` and `β` are fitted with `numpy.polyfit(z_score
 |----------|---------|
 | `get_earnings_history_of_ticker(ticker)` | DataFrame with `epsActual`, `epsEstimate` indexed by date |
 | `get_1d_return_of_ticker(ticker, date)` | Single-day return as a float; uses `_ceil_working_day` to skip weekends/holidays |
-| `fetch_ticker_historical_prices(ticker, start, end)` | OHLCV DataFrame |
-| `get_current_pe_of_ticker(ticker)` | Trailing P/E from `yf.Ticker.info` |
-| `get_current_forward_pe_of_ticker(ticker)` | Forward P/E |
-| `get_last_earnings_call_of_ticker(ticker)` | Most recent earnings date |
 
 **`SP500_companies.py`** — scrapes Wikipedia's S&P 500 table, returning a DataFrame with `Symbol` and `GICS Sector` columns used to organise tickers by sector for the proportionality model.
 
@@ -95,6 +91,38 @@ The regression coefficients `α` and `β` are fitted with `numpy.polyfit(z_score
 | `/{ticker}/proportionate` | GET | `filings_date` + `reaction_date` OR `surprise` + `cumalative_reaction` | Expected vs. actual CAR and proportionality ratio |
 
 All endpoints return JSON. Errors use standard HTTP status codes with a `detail` field.
+
+### System Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        Client / UI                           │
+└────────────────────────────┬─────────────────────────────────┘
+                             │  HTTP
+                    ┌────────▼─────────┐
+                    │   FastAPI Layer   │  app.py  ·  main.py
+                    │  Route dispatch  │  model.py (validation)
+                    └──┬───────────┬───┘
+                       │           │
+           ┌───────────▼──┐   ┌────▼────────────────┐
+           │ Business     │   │   Data Adapters      │
+           │ Logic        │   │   (adapters/)        │
+           │ helper_      │   │  yf.py · financials  │
+           │ functions.py │   │  SP500_companies.py  │
+           └───────┬──────┘   └────────┬─────────────┘
+                   │                   │
+           ┌───────▼───────────────────▼─────────┐
+           │            SQLite Cache              │
+           │            (markets.db)              │
+           │         sql_functions.py             │
+           └──────────────────────────────────────┘
+                           │
+           ┌───────────────▼───────────────────────┐
+           │         External Sources               │
+           │   Yahoo Finance (yfinance)             │
+           │   Wikipedia  (S&P 500 roster)          │
+           └───────────────────────────────────────┘
+```
 
 ## Possible improvments to the project
 - The calculation of reaction currently does not consider public holidays (but weekends are considered). Although this would be reletively simple fix as the `_round_to_working_day` function can be updated to include that information, but the process is time consuming and would lead to bruteforce

@@ -1,6 +1,3 @@
-import numpy as np
-from numpy.typing import NDArray
-
 def calc_surprise_of_ticker(trailing_eps: float, forward_eps: float) -> float:
     if trailing_eps == 0:
         return 0.0

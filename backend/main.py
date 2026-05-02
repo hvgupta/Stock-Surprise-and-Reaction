@@ -36,11 +36,6 @@ async def _compute_sector_proportionality_model(
     max_tickers_to_fetch: int = 20,
     max_filings_per_ticker: int = 6,
 ) -> tuple[float, float, float, float]:
-    """Compute (mean_surprise, sd_surprise, alpha, beta) for a sector.
-
-    Uses cached DB data where possible; if insufficient points, fetches a limited
-    number of tickers from yfinance to seed data.
-    """
 
     db = cast(SQLiteDatabase, request.app.state.database)
 

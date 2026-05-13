@@ -35,6 +35,11 @@ class SurpriseEndpointResponse(TypedDict):
     ticker: str
     surprise: Dict[str, float]
 
+class FilingReactionData(TypedDict):
+    reaction: Union[Dict[str, float], str]
+    surprise: float
+
+
 class ReactionEndpointResponse(TypedDict):
     ticker: str
-    reaction_data: Dict[str, Dict[str, Dict[str, Union[float, str]]]]
+    reaction_data: Dict[str, FilingReactionData]

@@ -1,6 +1,7 @@
 from app.adapters import SP500_COMPANIES, get_earnings_history_of_ticker
 from app.logger import get_configured_logger
 from app.model import (
+    FilingReactionData,
     PropotionateRequest,
     ReactionRequest,
     SurpriseEndpointResponse,
@@ -230,7 +231,7 @@ async def fetch_surprise_for_ticker(
 
     for row_date, row in eps_data.iterrows():
         logger.info(f"Processing EPS data for {ticker} on {row_date}")
-        logger.info(f"Row data: {row}")
+        logger.info(f"Row data: {row.to_dict()}")
         trailing_eps = row.get("epsActual")
         forward_eps = row.get("epsEstimate")
         logger.info(
@@ -286,7 +287,7 @@ async def fetch_reaction_for_ticker(
 
     db = cast(SQLiteDatabase, request.app.state.database)
 
-    date_to_reaction_data: Dict[str, Dict[str, Any]] = {}
+    date_to_reaction_data: Dict[str, FilingReactionData] = {}
 
     for filing_date in valid_filings_date:
         try:

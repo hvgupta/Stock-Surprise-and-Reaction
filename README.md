@@ -85,6 +85,5 @@ Start with the files below in this order:
 5. `app/adapters/` - external data sources such as Yahoo Finance and S&P 500 company data.
 
 ## Notes
-
 - The `/docs` page is the easiest way to explore available endpoints.
 - If a command fails on Windows, run it from the same PowerShell session where you used `uv sync` or `uv venv`.

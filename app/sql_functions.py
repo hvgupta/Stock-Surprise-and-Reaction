@@ -5,8 +5,7 @@ logger = get_configured_logger(__name__)
 import sqlite3
 from typing import Iterable, Optional, Dict, overload, Union, Tuple
 
-type DateValues[T] = Union[T, Dict[str, T]]
-type FilingDateValues[T] = Dict[str, Dict[str, T]]
+type DateValues[T] = Dict[str, T]
 
 
 class SQLiteDatabase:
@@ -67,7 +66,7 @@ class SQLiteDatabase:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
                 filing_date TEXT,
-                date TEXT,
+                reaction_date TEXT,
                 surprise REAL,
                 reaction REAL
             )
@@ -77,6 +76,7 @@ class SQLiteDatabase:
             CREATE TABLE IF NOT EXISTS proportionality_model (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sector TEXT NOT NULL,
+                filing_date TEXT,
                 percent_surprise_mean REAL,
                 percent_surprise_sd REAL,
                 alpha REAL,
@@ -84,17 +84,22 @@ class SQLiteDatabase:
             )
         """)
 
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_proportionality_model_sector_filing_date
+            ON proportionality_model(sector, filing_date)
+            """)
+
         # Backfill schema for older DBs that lack ticker_data.date
         existing_columns = {
             row[1]
             for row in cursor.execute("PRAGMA table_info(ticker_data)").fetchall()
         }
-        if "date" not in existing_columns:
-            cursor.execute("ALTER TABLE ticker_data ADD COLUMN date TEXT")
+        if "reaction_date" not in existing_columns:
+            cursor.execute("ALTER TABLE ticker_data ADD COLUMN reaction_date TEXT")
 
         cursor.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_ticker_data_symbol_date
-            ON ticker_data(symbol, date)
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ticker_data_symbol_reaction_date
+            ON ticker_data(symbol, reaction_date)
             """)
 
     def execute(
@@ -113,6 +118,11 @@ class SQLiteDatabase:
     ) -> None:
         cursor = self.cursor()
         cursor.executemany(query, seq_of_params)
+
+    def commit(self) -> None:
+        if self.connection is None:
+            raise RuntimeError("Database connection is not open")
+        self.connection.commit()
 
 
 def get_all_supported_tickers(db: SQLiteDatabase) -> list[str]:
@@ -135,17 +145,6 @@ def is_date_supported_for_ticker(db: SQLiteDatabase, ticker: str, date: str) -> 
     return len(rows) > 0
 
 
-@overload
-def get_ticker_surprise(
-    db: SQLiteDatabase, ticker: str, filing_date: str
-) -> Optional[float]: ...
-
-
-@overload
-def get_ticker_surprise(
-    db: SQLiteDatabase, ticker: str, filing_date: None = None
-) -> Optional[Dict[str, float]]: ...
-
 
 def get_ticker_surprise(
     db: SQLiteDatabase, ticker: str, filing_date: Optional[str] = None
@@ -155,58 +154,31 @@ def get_ticker_surprise(
             """
             SELECT surprise
             FROM ticker_data
-            WHERE symbol = ? AND date = ?
+            WHERE symbol = ? AND filing_date = ?
             LIMIT 1
             """,
             (ticker, filing_date),
         )
-        return rows[0][0] if rows else None
+        return {filing_date: rows[0][0]} if rows else None
 
     rows = db.execute(
         """
-        SELECT surprise, date
+        SELECT surprise, reaction_date
         FROM ticker_data
-        WHERE symbol = ? AND date IS NOT NULL AND surprise IS NOT NULL
-        ORDER BY date DESC
+        WHERE symbol = ? AND filing_date IS NOT NULL AND surprise IS NOT NULL
+        ORDER BY reaction_date DESC
         """,
         (ticker,),
     )
     return {row[1]: row[0] for row in rows} if rows else None
 
 
-@overload
-def get_ticker_reaction(
-    db: SQLiteDatabase,
-    ticker: str,
-    filing_date: str,
-    date: str,
-) -> Optional[FilingDateValues[float]]: ...
-
-
-@overload
-def get_ticker_reaction(
-    db: SQLiteDatabase,
-    ticker: str,
-    filing_date: str,
-    date: None = None,
-) -> Optional[FilingDateValues[float]]: ...
-
-
-@overload
-def get_ticker_reaction(
-    db: SQLiteDatabase,
-    ticker: str,
-    filing_date: None = None,
-    date: str | None = None,
-) -> Optional[FilingDateValues[float]]: ...
-
-
 def get_ticker_reaction(
     db: SQLiteDatabase,
     ticker: str,
     filing_date: Optional[str] = None,
-    date: Optional[str] = None,
-) -> Optional[FilingDateValues[float]]:
+    reaction_date: Optional[str] = None,
+) -> Optional[DateValues[DateValues[float]]]:
     """Fetch reaction values grouped by filing_date then date.
 
     Return shape is always:
@@ -219,92 +191,94 @@ def get_ticker_reaction(
     - both: return the specific value if it exists.
     """
 
-    if filing_date is not None and date is not None:
+    if filing_date is not None and reaction_date is not None:
         rows = db.execute(
             """
             SELECT reaction
             FROM ticker_data
-            WHERE symbol = ? AND filing_date = ? AND date = ? AND reaction IS NOT NULL
+            WHERE symbol = ? AND filing_date = ? AND reaction_date = ? AND reaction IS NOT NULL
             LIMIT 1
             """,
-            (ticker, filing_date, date),
+            (ticker, filing_date, reaction_date),
         )
-        return {filing_date: {date: rows[0][0]}} if rows else None
+        return {filing_date: {reaction_date: rows[0][0]}} if rows else None
 
     if filing_date is not None:
         rows = db.execute(
             """
-            SELECT date, reaction
+            SELECT reaction_date, reaction
             FROM ticker_data
-            WHERE symbol = ? AND filing_date = ? AND date IS NOT NULL AND reaction IS NOT NULL
-            ORDER BY date DESC
+            WHERE symbol = ? AND filing_date = ? AND reaction_date IS NOT NULL AND reaction IS NOT NULL
+            ORDER BY reaction_date DESC
             """,
             (ticker, filing_date),
         )
         if not rows:
             return None
-        return {filing_date: {row[0]: row[1] for row in rows}}
+        return {filing_date: {str(row[0]): float(row[1]) for row in rows}}
 
-    if date is not None:
+    if reaction_date is not None:
         rows = db.execute(
             """
             SELECT filing_date, reaction
             FROM ticker_data
-            WHERE symbol = ? AND date = ? AND filing_date IS NOT NULL AND reaction IS NOT NULL
+            WHERE symbol = ? AND reaction_date = ? AND filing_date IS NOT NULL AND reaction IS NOT NULL
             ORDER BY filing_date DESC
             """,
-            (ticker, date),
+            (ticker, reaction_date),
         )
         if not rows:
             return None
-        out: FilingDateValues[float] = {}
-        for filing_date_val, reaction in rows:
-            out[str(filing_date_val)] = {date: reaction}
-        return out
+        out: DateValues[float] = {}
+        return {str(row[0]): {reaction_date: float(row[1])} for row in rows}
 
     rows = db.execute(
         """
-        SELECT filing_date, date, reaction
+        SELECT filing_date, reaction_date, reaction
         FROM ticker_data
         WHERE symbol = ?
           AND filing_date IS NOT NULL
-          AND date IS NOT NULL
+          AND reaction_date IS NOT NULL
           AND reaction IS NOT NULL
-        ORDER BY filing_date DESC, date DESC
+        ORDER BY filing_date DESC, reaction_date DESC
         """,
         (ticker,),
     )
     if not rows:
         return None
-
-    out: FilingDateValues[float] = {}
-    for filing_date_val, date_val, reaction in rows:
-        filing_date_str = str(filing_date_val)
-        date_str = str(date_val)
-        if filing_date_str not in out:
-            out[filing_date_str] = {}
-        out[filing_date_str][date_str] = reaction
-    return out
+    return {str(row[0]): {str(row[1]): float(row[2])} for row in rows}
 
 
 def get_ticker_proportionality_data(
-    db: SQLiteDatabase, sector: str
-) -> Optional[Tuple[float, float, float, float]]:
+    db: SQLiteDatabase, sector: str, filings_date: Optional[str] = None
+) -> Optional[DateValues[Tuple[float, float, float, float]]]:
+    if filings_date is not None:
+        rows = db.execute(
+            """
+            SELECT percent_surprise_mean, percent_surprise_sd, alpha, beta
+            FROM proportionality_model
+            WHERE sector = ? AND filing_date = ?
+            LIMIT 1
+            """,
+            (sector, filings_date),
+        )
+        return {filings_date: rows[0]} if rows else None
     rows = db.execute(
         """
-        SELECT percent_surprise_mean, percent_surprise_sd, alpha, beta
+        SELECT filing_date, percent_surprise_mean, percent_surprise_sd, alpha, beta
         FROM proportionality_model
         WHERE sector = ?
-        LIMIT 1
+        ORDER BY filing_date
         """,
         (sector,),
     )
-    return rows[0] if rows else None
+    return {row[0]: row[1:] for row in rows} if rows else None
 
 
 def upsert_proportionality_model(
     db: SQLiteDatabase,
     sector: str,
+    filing_date: str,
     percent_surprise_mean: float,
     percent_surprise_sd: float,
     alpha: float,
@@ -319,22 +293,23 @@ def upsert_proportionality_model(
     db.execute(
         """
         DELETE FROM proportionality_model
-        WHERE sector = ?
+        WHERE sector = ? AND filing_date = ?
         """,
-        (sector,),
+        (sector, filing_date),
     )
     db.execute(
         """
         INSERT INTO proportionality_model (
             sector,
+            filing_date,
             percent_surprise_mean,
             percent_surprise_sd,
             alpha,
             beta
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (sector, percent_surprise_mean, percent_surprise_sd, alpha, beta),
+        (sector, filing_date, percent_surprise_mean, percent_surprise_sd, alpha, beta),
     )
 
 
@@ -381,6 +356,7 @@ def upsert_earnings_calendar_rows(
         """,
         rows,
     )
+    db.commit()
 
 
 def upsert_eps_data_of_ticker(
@@ -400,6 +376,7 @@ def upsert_eps_data_of_ticker(
         """,
         (ticker, date, eps_actual, eps_estimated),
     )
+    db.commit()
 
 
 def upsert_surprise_data(
@@ -407,25 +384,22 @@ def upsert_surprise_data(
 ) -> None:
     db.execute(
         """
-        INSERT INTO ticker_data (symbol, date, surprise)
+        INSERT INTO ticker_data (symbol, filing_date, surprise)
         VALUES (?, ?, ?)
-        ON CONFLICT(symbol, date) DO UPDATE SET
-            surprise = excluded.surprise
         """,
         (ticker, date, surprise),
     )
+    db.commit()
 
 
 def upsert_reaction_data(
-    db: SQLiteDatabase, ticker: str, filing_date: str, date: str, reaction: float
+    db: SQLiteDatabase, ticker: str, filing_date: str, reaction_date: str, reaction: float
 ) -> None:
     db.execute(
         """
-        INSERT INTO ticker_data (symbol, filing_date, date, reaction)
+        INSERT INTO ticker_data (symbol, filing_date, reaction_date, reaction)
         VALUES (?, ?, ?, ?)
-        ON CONFLICT(symbol, date) DO UPDATE SET
-            filing_date = excluded.filing_date,
-            reaction = excluded.reaction
         """,
-        (ticker, filing_date, date, reaction),
+        (ticker, filing_date, reaction_date, reaction),
     )
+    db.commit()

@@ -8,8 +8,10 @@ from app.model import (
     ReactionEndpointResponse,
 )
 from app.sql_functions import (
+    DateValues,
     SQLiteDatabase,
     get_ticker_proportionality_data,
+    get_ticker_reaction,
     get_ticker_surprise,
     ticker_in_db,
     upsert_proportionality_model,
@@ -18,167 +20,73 @@ from app.helper_functions import (
     get_reaction_for_date,
     get_surprise_for_date,
     normalize_date_str,
+    normalize_x,
 )
 
 logger = get_configured_logger(__name__)
 
 import numpy as np
-from typing import Dict, List, Any, cast
-from fastapi import Depends, HTTPException, Query, Request
+from typing import Dict, List
+from fastapi import HTTPException
 
 
-async def _compute_sector_proportionality_model(
-    request: Request,
+async def _compute_proportionality_model_for_ticker(
+    db: SQLiteDatabase,
     sector: str,
     tickers: list[str],
-    *,
-    max_pairs: int = 60,
-    min_pairs: int = 12,
-    max_tickers_to_fetch: int = 20,
-    max_filings_per_ticker: int = 6,
-) -> tuple[float, float, float, float]:
-
-    db = cast(SQLiteDatabase, request.app.state.database)
-
-    pairs: list[tuple[float, float]] = []
-
-    async def _add_cached_pairs_for_ticker(ticker: str) -> None:
-        nonlocal pairs
-        try:
-            surprise_resp = await fetch_surprise_for_ticker(request, ticker, None)
-        except Exception as e:
-            logger.error(f"Error fetching surprise for {ticker}: {e}")
-            return
-
-        surprise_data = (
-            surprise_resp.get("surprise") if isinstance(surprise_resp, dict) else None
-        )
-        if not isinstance(surprise_data, dict) or not surprise_data:
-            return
-
-        for filing_date, surprise_val in surprise_data.items():
-            if surprise_val is None:
-                continue
-            filing_date_norm = normalize_date_str(str(filing_date))
-
-            # Use the existing reaction endpoint logic to compute/retrieve reaction
-            try:
-                reaction_resp = await fetch_reaction_for_ticker(
-                    request,
-                    ticker,
-                    ReactionRequest(
-                        reaction_days_threshold=3,
-                        market_index="SPY",
-                        surprise_threshold=0.0,
-                        filings_date=filing_date_norm,
-                        reaction_date=None,
-                    ),
-                )
-            except Exception:
-                continue
-
-            reaction_data = (
-                reaction_resp.get("reaction_data")
-                if isinstance(reaction_resp, dict)
-                else None
-            )
-            if not isinstance(reaction_data, dict):
-                continue
-
-            filing_entry = reaction_data.get(filing_date_norm)
-            if filing_entry is None:
-                continue
-
-            reaction_series = filing_entry.get("reaction")
-            car_val = None
-            if isinstance(reaction_series, dict):
-                last_date = sorted(reaction_series.keys())[-1]
-                car_val = reaction_series.get(last_date)
-            elif isinstance(reaction_series, (int, float)):
-                car_val = reaction_series
-
-            if isinstance(car_val, (int, float)):
-                pairs.append((float(surprise_val), float(car_val)))
-            if len(pairs) >= max_pairs:
-                return
-
+):
+    Y = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
+    unnormalized_x = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
     for ticker in tickers:
-        await _add_cached_pairs_for_ticker(ticker)
-        if len(pairs) >= max_pairs:
-            break
+        surprise_data = get_ticker_surprise(db, ticker)
+        reaction_data = get_ticker_reaction(db, ticker)
 
-    if len(pairs) < min_pairs:
-        tickers_fetched = 0
-        for ticker in tickers:
-            if tickers_fetched >= max_tickers_to_fetch or len(pairs) >= max_pairs:
-                break
+        if surprise_data is None or reaction_data is None:
+            reaction_info = await fetch_reaction_for_ticker(
+                db, ticker, ReactionRequest(reaction_days_threshold=3, surprise_threshold=0)
+            )
 
-            eps_data = get_earnings_history_of_ticker(ticker)
-            if eps_data is None or eps_data.empty:  # type: ignore[attr-defined]
-                continue
-
-            tickers_fetched += 1
-            filings_seen = 0
-            for row_date, row in eps_data.iterrows():
-                if filings_seen >= max_filings_per_ticker or len(pairs) >= max_pairs:
-                    break
-
-                trailing_eps = row.get("epsActual")
-                forward_eps = row.get("epsEstimate")
-                if trailing_eps is None or forward_eps is None:
+            for filing_date, filing_reaction_data in reaction_info["reaction_data"].items():
+                if isinstance(filing_reaction_data["reaction"], str):
                     continue
+                filing_date_norm = normalize_date_str(str(filing_date))
+                latest_reaction_key = sorted(filing_reaction_data["reaction"].keys())[-1]
+                latest_reaction_val = filing_reaction_data["reaction"][latest_reaction_key]
+                surprise = filing_reaction_data["surprise"]
 
-                filing_date_norm = normalize_date_str(str(row_date))
-                surprise_val = get_surprise_for_date(
-                    db,
-                    ticker,
-                    float(trailing_eps),
-                    float(forward_eps),
-                    filing_date_norm,
-                )
-                reaction = get_reaction_for_date(
-                    db,
-                    ticker,
-                    "SPY",
-                    filing_date_norm,
-                    None,
-                )
-                if reaction is None:
+                for target_date in Y.keys():
+                    if target_date <= filing_date_norm:
+                        continue
+                    unnormalized_x[target_date].append(float(surprise))
+                    Y[target_date].append(float(latest_reaction_val))
+            continue
+
+        for filing_date in sorted(set(surprise_data.keys()) & set(reaction_data.keys())):
+            filing_date_norm = normalize_date_str(str(filing_date))
+            latest_reaction_key = sorted(reaction_data[filing_date].keys())[-1]
+            latest_reaction_val = reaction_data[filing_date][latest_reaction_key]
+            surprise = surprise_data[filing_date]
+
+            for target_date in Y.keys():
+                if target_date <= filing_date_norm:
                     continue
+                unnormalized_x[target_date].append(float(surprise))
+                Y[target_date].append(float(latest_reaction_val))
 
-                series = reaction.get(filing_date_norm) or {}
-                if not series:
-                    continue
+    model_dict: DateValues[tuple[float, float, float, float]] = {}
+    for date in Y.keys():
+        normalized_x, x_mean, x_sd = normalize_x(unnormalized_x[date])
+        filing_y = np.array(Y[date], dtype=np.float64)
+        beta, alpha = np.polyfit(normalized_x, filing_y, deg=1)
 
-                last_date = sorted(series.keys())[-1]
-                car_val = series[last_date]
-                if isinstance(car_val, (int, float)):
-                    pairs.append((float(surprise_val), float(car_val)))
-                    filings_seen += 1
-
-    if len(pairs) < min_pairs:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"insufficient data to fit proportionality model for sector {sector} "
-                f"(need >= {min_pairs} samples, got {len(pairs)})"
-            ),
+        logger.info(
+            f"Proportionality model for sector {sector} on date {date}: "
+            f"alpha={alpha}, beta={beta}, x_mean={x_mean}, x_sd={x_sd}, num_samples={len(filing_y)}"
         )
+        upsert_proportionality_model(db, sector, date, x_mean, x_sd, alpha, beta)
+        model_dict[date] = (x_mean, x_sd, alpha, beta)
 
-    surprises = [s for s, _ in pairs]
-    cars = [c for _, c in pairs]
-
-    surprises_arr = np.array(surprises, dtype=np.float64)
-    cars_arr = np.array(cars, dtype=np.float64)
-
-    mean_surprise = float(np.mean(surprises_arr))
-    sd_surprise = float(np.std(surprises_arr, ddof=0))
-    if sd_surprise < 1e-12:
-        sd_surprise = 1e-12
-
-    z_scores = (surprises_arr - mean_surprise) / sd_surprise
-    beta, alpha = np.polyfit(z_scores, cars_arr, deg=1)
-    return (mean_surprise, sd_surprise, alpha, beta)
+    return model_dict
 
 
 async def health_check():
@@ -186,29 +94,21 @@ async def health_check():
 
 
 async def fetch_surprise_for_ticker(
-    request: Request, ticker: str, filing_date: str | None = Query(default=None)
+    db: SQLiteDatabase, ticker: str, filing_date: str | None
 ) -> SurpriseEndpointResponse:
-    db_conn = cast(SQLiteDatabase, request.app.state.database)
 
     if filing_date is not None:
         filing_date = normalize_date_str(filing_date)
 
-    surprise = get_ticker_surprise(db_conn, ticker, filing_date)
+    surprise = get_ticker_surprise(db, ticker, filing_date)
     logger.info(f"Fetched surprise for {ticker} on {filing_date}: {surprise}")
     if surprise is not None:
         logger.info(
             f"Surprise data found in database for {ticker} on {filing_date}, returning cached value"
         )
-        return {
-            "ticker": ticker,
-            "surprise": (
-                surprise
-                if isinstance(surprise, Dict)
-                else {str(filing_date): float(surprise)}
-            ),
-        }
+        return {"ticker": ticker, "surprise": surprise}
 
-    if ticker_in_db(db_conn, ticker) is True:
+    if ticker_in_db(db, ticker) is True:
         raise HTTPException(
             status_code=404,
             detail=f"surprise data not found for ticker {ticker} on date {filing_date}, even though the ticker exists in the database, likely means that the date is not supported for this ticker",
@@ -242,7 +142,7 @@ async def fetch_surprise_for_ticker(
 
         normalized_row_date = normalize_date_str(str(row_date))
         surprise = get_surprise_for_date(
-            db_conn, ticker, trailing_eps, forward_eps, normalized_row_date
+            db, ticker, trailing_eps, forward_eps, normalized_row_date
         )
         date_to_surprise[normalized_row_date] = surprise
 
@@ -256,7 +156,7 @@ async def fetch_surprise_for_ticker(
 
 
 async def fetch_reaction_for_ticker(
-    request: Request, ticker: str, reaction_request: ReactionRequest = Depends()
+    db: SQLiteDatabase, ticker: str, reaction_request: ReactionRequest
 ) -> ReactionEndpointResponse:
     surprise_threshold = reaction_request.surprise_threshold
     market_index = reaction_request.market_index
@@ -272,7 +172,7 @@ async def fetch_reaction_for_ticker(
         else None
     )
 
-    surprise = await fetch_surprise_for_ticker(request, ticker, filing_date)
+    surprise = await fetch_surprise_for_ticker(db, ticker, filing_date)
     valid_filings_date: List[str] = [
         date
         for date, surprise in surprise["surprise"].items()
@@ -284,8 +184,6 @@ async def fetch_reaction_for_ticker(
             status_code=400,
             detail=f"the surprise value {surprise['surprise']} for ticker {ticker} is below the threshold of {surprise_threshold}, so reaction is not calculated",
         )
-
-    db = cast(SQLiteDatabase, request.app.state.database)
 
     date_to_reaction_data: Dict[str, FilingReactionData] = {}
 
@@ -324,19 +222,58 @@ async def fetch_reaction_for_ticker(
     }
 
 
-async def fetch_proportionality_for_ticker(
-    request: Request,
+async def fetch_surprise_and_latest_reaction(
+    db: SQLiteDatabase,
     ticker: str,
-    proportionate_request: PropotionateRequest = Depends(),
+    filings_date: str,
+):
+    surprise_data = get_ticker_surprise(db, ticker, filings_date)
+    reaction_data = get_ticker_reaction(db, ticker, filing_date=filings_date)
+
+    if surprise_data is not None and reaction_data is not None and filings_date in surprise_data and filings_date in reaction_data:
+        latest_reaction_key = sorted(reaction_data[filings_date].keys())[-1]
+        return surprise_data[filings_date], reaction_data[filings_date][latest_reaction_key]
+
+    surprise_reaction_data = await fetch_reaction_for_ticker(
+        db,
+        ticker,
+        ReactionRequest(
+            reaction_days_threshold=3,
+            surprise_threshold=0,
+        ),
+    )
+    surprise_reaction_map = surprise_reaction_data["reaction_data"]
+    if filings_date not in surprise_reaction_map:
+        raise HTTPException(
+            status_code=404,
+            detail=f"surprise data not available for {ticker} on filings_date {filings_date} or the provided filings_date is not correct",
+        )
+    surprise_reaction = surprise_reaction_map[filings_date]
+    if isinstance(surprise_reaction["reaction"], str):
+        raise HTTPException(
+            status_code=400,
+            detail=f"reaction data for {ticker} on filings_date {filings_date} is not sufficient to compute proportionality, reason: {surprise_reaction['reaction']}",
+        )
+    sorted_dates = sorted(surprise_reaction_map.keys())
+    if filings_date == sorted_dates[0]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Filings date {filings_date} for ticker {ticker} is the earliest available date in the database, therefore no model can be made for it",
+        )
+    surprise_value = surprise_reaction["surprise"]
+    reaction_value = surprise_reaction["reaction"][sorted_dates[-1]]
+
+    return surprise_value, reaction_value
+
+
+async def fetch_proportionality_for_ticker(
+    db: SQLiteDatabase,
+    ticker: str,
+    proportionate_request: PropotionateRequest,
 ):
     filings_date = (
         normalize_date_str(proportionate_request.filings_date)
         if proportionate_request.filings_date is not None
-        else None
-    )
-    reaction_date = (
-        normalize_date_str(proportionate_request.reaction_date)
-        if proportionate_request.reaction_date is not None
         else None
     )
 
@@ -344,93 +281,50 @@ async def fetch_proportionality_for_ticker(
     # 1) `filings_date` provided -> compute surprise via the usual path and fetch reaction
     # 2) `surprise` and `cumalative_reaction` provided -> use the supplied values directly
 
-    if filings_date is not None:
-        surprise_data = await fetch_surprise_for_ticker(request, ticker, filings_date)
-        surprise_map = surprise_data["surprise"]
-        if filings_date not in surprise_map:
-            raise HTTPException(
-                status_code=404,
-                detail=f"surprise data not available for {ticker} on filings_date {filings_date} or the provided filings_date is not correct",
-            )
-        surprise_value = float(surprise_map[filings_date])
-    else:
-        # Validator guarantees these are present when filings_date is missing
-        surprise_value = float(proportionate_request.surprise)  # type: ignore[arg-type]
-
     ticker_sector: str = SP500_COMPANIES[SP500_COMPANIES["Symbol"] == ticker][
         "GICS Sector"
     ].values[0]
 
     proportionality_data = get_ticker_proportionality_data(
-        cast(SQLiteDatabase, request.app.state.database), ticker_sector
+        db, ticker_sector, filings_date
     )
+
     if proportionality_data is None:
         all_companies_in_sector: List[str] = SP500_COMPANIES[
             SP500_COMPANIES["GICS Sector"] == ticker_sector
         ]["Symbol"].tolist()
-        db = cast(SQLiteDatabase, request.app.state.database)
-        mean_surp, sd_surp, alpha, beta = await _compute_sector_proportionality_model(
-            request, ticker_sector, all_companies_in_sector
-        )
-        upsert_proportionality_model(db, ticker_sector, mean_surp, sd_surp, alpha, beta)
-        proportionality_data = (mean_surp, sd_surp, alpha, beta)
-
-    surpirse_mean, surprise_sd, alpha, beta = proportionality_data
-    surprise_z_score = (surprise_value - surpirse_mean) / (surprise_sd + 1e-9)
-    expected_CAR = alpha + beta * surprise_z_score
-
-    if filings_date is not None:
-        reaction_response = await fetch_reaction_for_ticker(
-            request,
-            ticker,
-            ReactionRequest(
-                reaction_days_threshold=3,
-                market_index="SPY",
-                filings_date=filings_date,
-                reaction_date=reaction_date,
-            ),
+        proportionality_data = await _compute_proportionality_model_for_ticker(
+            db, ticker_sector, all_companies_in_sector
         )
 
-        actual_CAR = reaction_response["reaction_data"][filings_date]["reaction"]
-        if isinstance(actual_CAR, str):
-            raise HTTPException(
-                status_code=404,
-                detail=f"reaction data not available for {ticker} on filings_date {filings_date}",
-            )
-
-    else:
-        # Use supplied cumulative reaction
-        actual_CAR = float(proportionate_request.cumalative_reaction)  # type: ignore[arg-type]
-
-    logger.info(
-        f"Computed proportionality for {ticker}: expected_CAR={expected_CAR}, actual_CAR={actual_CAR}"
+    valid_dates = (
+        [filings_date]
+        if filings_date is not None
+        else list(proportionality_data.keys())
     )
 
-    if isinstance(actual_CAR, (int, float)):
-        pct_diff_from_expected = (
-            None
-            if abs(expected_CAR) < 1e-12
-            else (actual_CAR - expected_CAR) / expected_CAR
+    pct_diff_dict: DateValues[Dict[str, float]] = {}
+    for date in valid_dates:
+        actual_surprise, actual_CAR = (
+            await fetch_surprise_and_latest_reaction(db, ticker, date)
+            if filings_date is not None
+            else (
+                float(proportionate_request.surprise), # type: ignore
+                float(proportionate_request.cumalative_reaction), # type: ignore
+            )
         )
 
-        return {
-            "pct_diff_from_expected": pct_diff_from_expected,
+        surpirse_mean, surprise_sd, alpha, beta = proportionality_data[date]
+        surprise_z_score = (actual_surprise - surpirse_mean) / (surprise_sd + 1e-9)
+        expected_CAR = alpha + beta * surprise_z_score
+
+        logger.info(
+            f"Computed proportionality for {ticker}: expected_CAR={expected_CAR}, actual_CAR={actual_CAR}"
+        )
+        pct_diff_dict[date] = {
+            "pct_diff_from_expected": (actual_CAR - expected_CAR) / expected_CAR,
             "expected_CAR": expected_CAR,
             "actual_CAR": actual_CAR,
         }
 
-    pct_diff_from_expected_map = {}
-    for date, reaction in actual_CAR.items():
-        if isinstance(reaction, str):
-            continue
-        pct_diff_from_expected_map[date] = {
-            "pct_diff_from_expected": (
-                None
-                if abs(expected_CAR) < 1e-12
-                else (reaction - expected_CAR) / expected_CAR
-            ),
-            "expected_CAR": expected_CAR,
-            "actual_CAR": reaction,
-        }
-
-    return pct_diff_from_expected_map
+    return pct_diff_dict

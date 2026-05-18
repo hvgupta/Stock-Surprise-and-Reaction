@@ -163,7 +163,7 @@ def get_ticker_surprise(
 
     rows = db.execute(
         """
-        SELECT surprise, reaction_date
+        SELECT surprise, filing_date
         FROM ticker_data
         WHERE symbol = ? AND filing_date IS NOT NULL AND surprise IS NOT NULL
         ORDER BY reaction_date DESC

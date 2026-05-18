@@ -25,6 +25,7 @@ from app.helper_functions import (
 
 logger = get_configured_logger(__name__)
 
+import asyncio
 import numpy as np
 from typing import Dict, List
 from fastapi import HTTPException
@@ -37,35 +38,26 @@ async def _compute_proportionality_model_for_ticker(
 ):
     Y = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
     unnormalized_x = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
-    for ticker in tickers:
-        surprise_data = get_ticker_surprise(db, ticker)
-        reaction_data = get_ticker_reaction(db, ticker)
-
-        if surprise_data is None or reaction_data is None:
-            reaction_info = await fetch_reaction_for_ticker(
-                db, ticker, ReactionRequest(reaction_days_threshold=3, surprise_threshold=0)
+    logger.info(f"Computing proportionality model for sector {sector} with tickers: {tickers}")
+    reaction_results = await asyncio.gather(
+        *[
+            fetch_reaction_for_ticker(
+                db,
+                ticker,
+                ReactionRequest(reaction_days_threshold=3, surprise_threshold=0),
             )
+            for ticker in tickers
+        ]
+    )
 
-            for filing_date, filing_reaction_data in reaction_info["reaction_data"].items():
-                if isinstance(filing_reaction_data["reaction"], str):
-                    continue
-                filing_date_norm = normalize_date_str(str(filing_date))
-                latest_reaction_key = sorted(filing_reaction_data["reaction"].keys())[-1]
-                latest_reaction_val = filing_reaction_data["reaction"][latest_reaction_key]
-                surprise = filing_reaction_data["surprise"]
-
-                for target_date in Y.keys():
-                    if target_date <= filing_date_norm:
-                        continue
-                    unnormalized_x[target_date].append(float(surprise))
-                    Y[target_date].append(float(latest_reaction_val))
-            continue
-
-        for filing_date in sorted(set(surprise_data.keys()) & set(reaction_data.keys())):
-            filing_date_norm = normalize_date_str(str(filing_date))
-            latest_reaction_key = sorted(reaction_data[filing_date].keys())[-1]
-            latest_reaction_val = reaction_data[filing_date][latest_reaction_key]
-            surprise = surprise_data[filing_date]
+    for reaction_data in reaction_results:
+        for filing_date, filing_reaction_data in reaction_data["reaction_data"].items():
+            if isinstance(filing_reaction_data["reaction"], str):
+                continue
+            filing_date_norm = normalize_date_str(filing_date)
+            latest_reaction_key = sorted(filing_reaction_data["reaction"].keys())[-1]
+            latest_reaction_val = filing_reaction_data["reaction"][latest_reaction_key]
+            surprise = filing_reaction_data["surprise"]
 
             for target_date in Y.keys():
                 if target_date <= filing_date_norm:
@@ -172,13 +164,21 @@ async def fetch_reaction_for_ticker(
         else None
     )
 
-    surprise = await fetch_surprise_for_ticker(db, ticker, filing_date)
+    try:
+        surprise = await fetch_surprise_for_ticker(db, ticker, filing_date)
+        logger.info(f"Fetched surprise data for {ticker}: {surprise}")
+    except HTTPException as e:
+        logger.error(f"Error fetching surprise data for {ticker}: {e.detail}")
+        raise
+
     valid_filings_date: List[str] = [
         date
         for date, surprise in surprise["surprise"].items()
         if surprise is not None and abs(surprise) >= surprise_threshold
     ]
-
+    logger.info(
+        f"Valid filing dates for {ticker} with surprise threshold {surprise_threshold}: {valid_filings_date}"
+    )
     if len(valid_filings_date) == 0:
         raise HTTPException(
             status_code=400,

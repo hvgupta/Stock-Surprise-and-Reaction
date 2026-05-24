@@ -60,3 +60,12 @@ async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionReque
 async def fetch_proportionality_for_ticker(ticker: str, proportionate_request: PropotionateRequest = Query(...)):
     db = cast(SQLiteDatabase, app.state.database)
     return await handlers.fetch_proportionality_for_ticker(db, ticker, proportionate_request)
+
+
+@app.get("/generated_plots/proportionality/data")
+async def fetch_generated_proportionality_plot_data(
+    sector: str = Query(...),
+    filing_date: str = Query(...),
+):
+    db = cast(SQLiteDatabase, app.state.database)
+    return await handlers.fetch_generated_proportionality_plot_data(db, sector, filing_date)

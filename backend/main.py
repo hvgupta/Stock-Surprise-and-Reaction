@@ -2,6 +2,9 @@ from backend.adapters import SP500_COMPANIES, get_earnings_history_of_ticker
 from backend.logger import get_configured_logger
 from backend.model import (
     FilingReactionData,
+    GeneratedProportionalityLinePoint,
+    GeneratedProportionalityPlotResponse,
+    GeneratedProportionalityPoint,
     PropotionateRequest,
     ProportionalityResponseEntry,
     ReactionRequest,
@@ -29,6 +32,7 @@ from backend.helper_functions import (
 logger = get_configured_logger(__name__)
 
 import asyncio
+import json
 import numpy as np
 from typing import Dict, List
 from fastapi import HTTPException
@@ -39,6 +43,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 PLOT_OUTPUT_DIR = Path(__file__).resolve().parent / "generated_plots" / "proportionality"
+
+
+def _sector_dir_name(sector: str) -> str:
+    return sector.replace("/", "_")
 
 def _latest_entry(values: Dict[str, float]) -> tuple[str, float]:
     latest_key = sorted(values.keys())[-1]
@@ -130,9 +138,13 @@ async def _compute_proportionality_model_for_ticker(
         x_raw = np.array(unnormalized_x[date], dtype=np.float64)
         filing_y = np.array(Y[date], dtype=np.float64)
 
-        fit_mask = _filter_outliers_iqr(x_raw)
+        fit_mask = _filter_outliers_iqr(filing_y)
         filtered_raw = x_raw[fit_mask]
         filtered_y = filing_y[fit_mask]
+
+        # compute excluded (outlier) raw values for plotting and domain calculation
+        excluded_raw = x_raw[~fit_mask]
+        excluded_y = filing_y[~fit_mask]
 
         if len(filtered_raw) == 0:
             logger.warning(
@@ -163,8 +175,17 @@ async def _compute_proportionality_model_for_ticker(
             x_sd = 1e-9
         x_values = normalized_filtered_x
         y_values = filtered_y
-        x_min = float(np.min(x_values))
-        x_max = float(np.max(x_values))
+        # compute excluded z-scores so the regression line spans the full plotted domain
+        excluded_z: np.ndarray = np.array([])
+        if len(excluded_raw) > 0:
+            try:
+                excluded_z = (excluded_raw - x_mean) / (x_sd if x_sd != 0 else 1e-9)
+            except Exception:
+                excluded_z = np.array([])
+
+        all_z_values = np.concatenate([x_values, excluded_z]) if excluded_z.size > 0 else x_values
+        x_min = float(np.min(all_z_values))
+        x_max = float(np.max(all_z_values))
         if x_min == x_max:
             x_min -= 0.01
             x_max += 0.01
@@ -175,6 +196,7 @@ async def _compute_proportionality_model_for_ticker(
         plot_dir = PLOT_OUTPUT_DIR / sector.replace("/", "_")
         plot_dir.mkdir(parents=True, exist_ok=True)
         plot_path = plot_dir / f"{date}.png"
+        plot_data_path = plot_dir / f"{date}.json"
 
         fig, ax = plt.subplots(figsize=(8, 5), dpi=150)
         ax.scatter(
@@ -196,6 +218,41 @@ async def _compute_proportionality_model_for_ticker(
         fig.tight_layout()
         fig.savefig(plot_path, bbox_inches="tight")
         plt.close(fig)
+
+        points: list[GeneratedProportionalityPoint] = [
+            {
+                "z_score": float(z_val),
+                "reaction": float(y_val),
+            }
+            for z_val, y_val in zip(x_values.tolist(), y_values.tolist())
+        ]
+        outliers: list[GeneratedProportionalityPoint] = [
+            {
+                "z_score": float((raw_val - x_mean) / x_sd),
+                "reaction": float(y_val),
+            }
+            for raw_val, y_val in zip(excluded_raw.tolist(), excluded_y.tolist())
+        ]
+        line_points: list[GeneratedProportionalityLinePoint] = [
+            {
+                "z_score": float(z_val),
+                "expected_reaction": float(y_val),
+            }
+            for z_val, y_val in zip(x_line.tolist(), y_line.tolist())
+        ]
+
+        plot_payload: GeneratedProportionalityPlotResponse = {
+            "sector": sector,
+            "filing_date": date,
+            "alpha": float(alpha),
+            "beta": float(beta),
+            "x_mean": float(x_mean),
+            "x_sd": float(x_sd),
+            "points": points,
+            "outliers": outliers,
+            "line_points": line_points,
+        }
+        plot_data_path.write_text(json.dumps(plot_payload), encoding="utf-8")
         logger.info(f"Saved proportionality plot to {plot_path}")
 
     return model_dict
@@ -203,6 +260,49 @@ async def _compute_proportionality_model_for_ticker(
 
 async def health_check():
     return {"status": "ok"}
+
+
+async def fetch_generated_proportionality_plot_data(
+    db: SQLiteDatabase,
+    sector: str,
+    filing_date: str,
+) -> GeneratedProportionalityPlotResponse:
+    normalized_filing_date = normalize_date_str(filing_date)
+    data_path = PLOT_OUTPUT_DIR / _sector_dir_name(sector) / f"{normalized_filing_date}.json"
+    if not data_path.exists():
+        sector_tickers: list[str] = SP500_COMPANIES[
+            SP500_COMPANIES["GICS Sector"] == sector
+        ]["Symbol"].dropna().astype(str).tolist()
+
+        if len(sector_tickers) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"sector {sector} not found in S&P 500 list",
+            )
+
+        logger.info(
+            f"Generated plot data not found for sector {sector} on {normalized_filing_date}; computing on demand"
+        )
+        await _compute_proportionality_model_for_ticker(db, sector, sector_tickers)
+
+    if not data_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"generated proportionality plot data not found for sector {sector} on {normalized_filing_date}",
+        )
+
+    try:
+        payload = json.loads(data_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to read generated proportionality plot data: {exc}",
+        )
+
+    if "outliers" not in payload:
+        payload["outliers"] = []
+
+    return payload
 
 
 async def fetch_surprise_for_ticker(

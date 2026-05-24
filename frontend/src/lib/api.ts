@@ -57,6 +57,28 @@ export type ReactionEndpointResponse = {
 
 export type ProportionalityEndpointResponse = Record<string, ProportionalityResponseEntry>;
 
+export type GeneratedProportionalityPoint = {
+  z_score: number;
+  reaction: number;
+};
+
+export type GeneratedProportionalityLinePoint = {
+  z_score: number;
+  expected_reaction: number;
+};
+
+export type GeneratedProportionalityPlotResponse = {
+  sector: string;
+  filing_date: string;
+  alpha: number;
+  beta: number;
+  x_mean: number;
+  x_sd: number;
+  points: GeneratedProportionalityPoint[];
+  outliers?: GeneratedProportionalityPoint[];
+  line_points: GeneratedProportionalityLinePoint[];
+};
+
 async function request<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "GET",
@@ -119,5 +141,15 @@ export async function getTickerProportionality(
   const query = new URLSearchParams({ filings_date: filingsDate });
   return request<ProportionalityEndpointResponse>(
     `/${encodeURIComponent(symbol)}/proportionate?${query.toString()}`,
+  );
+}
+
+export async function getGeneratedProportionalityPlotData(
+  sector: string,
+  filingsDate: string,
+): Promise<GeneratedProportionalityPlotResponse> {
+  const query = new URLSearchParams({ sector, filing_date: filingsDate });
+  return request<GeneratedProportionalityPlotResponse>(
+    `/generated_plots/proportionality/data?${query.toString()}`,
   );
 }

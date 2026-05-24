@@ -74,3 +74,25 @@ class ProportionalityResponseEntry(TypedDict):
     expected_CAR: float
     actual_CAR: float
     regression_model: RegressionModelValues
+
+
+class GeneratedProportionalityPoint(TypedDict):
+    z_score: float
+    reaction: float
+
+
+class GeneratedProportionalityLinePoint(TypedDict):
+    z_score: float
+    expected_reaction: float
+
+
+class GeneratedProportionalityPlotResponse(TypedDict):
+    sector: str
+    filing_date: str
+    alpha: float
+    beta: float
+    x_mean: float
+    x_sd: float
+    points: list[GeneratedProportionalityPoint]
+    outliers: list[GeneratedProportionalityPoint]
+    line_points: list[GeneratedProportionalityLinePoint]

@@ -4,7 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 
 import SurpriseCard from "@/components/surprise-card";
+import SummaryStatsBanner from "@/components/summary-stats-banner";
+import SectorSurpriseChart from "@/components/sector-surprise-chart";
+import SurpriseHistogram, { type HistogramBucket } from "@/components/surprise-histogram";
+import SurpriseReactionScatter from "@/components/surprise-reaction-scatter";
 import { fetchSP500SurprisesFresh, type SP500TickerSnapshot } from "@/lib/api";
+
+const HISTOGRAM_BUCKETS: Array<{ label: string; min: number; max: number; isPositive: boolean }> = [
+  { label: "< -20%", min: -Infinity, max: -20, isPositive: false },
+  { label: "-20→-10%", min: -20, max: -10, isPositive: false },
+  { label: "-10→-5%", min: -10, max: -5, isPositive: false },
+  { label: "-5→0%", min: -5, max: 0, isPositive: false },
+  { label: "0→+5%", min: 0, max: 5, isPositive: true },
+  { label: "+5→+10%", min: 5, max: 10, isPositive: true },
+  { label: "+10→+20%", min: 10, max: 20, isPositive: true },
+  { label: "> +20%", min: 20, max: Infinity, isPositive: true },
+];
 
 export default function Home() {
   const [items, setItems] = useState<SP500TickerSnapshot[]>([]);
@@ -37,6 +52,54 @@ export default function Home() {
       }),
     [items],
   );
+
+  const summaryStats = useMemo(() => {
+    const beats = items.filter((x) => x.surprise > 0);
+    const misses = items.filter((x) => x.surprise < 0);
+    const avgBeat = beats.length
+      ? beats.reduce((s, x) => s + x.surprise, 0) / beats.length
+      : 0;
+    const avgMiss = misses.length
+      ? misses.reduce((s, x) => s + x.surprise, 0) / misses.length
+      : 0;
+    return { total: items.length, beatCount: beats.length, missCount: misses.length, avgBeat, avgMiss };
+  }, [items]);
+
+  const sectorData = useMemo(() => {
+    const map = new Map<string, { sum: number; count: number }>();
+    for (const item of items) {
+      const entry = map.get(item.sector) ?? { sum: 0, count: 0 };
+      entry.sum += item.surprise;
+      entry.count += 1;
+      map.set(item.sector, entry);
+    }
+    return Array.from(map.entries())
+      .map(([sector, { sum, count }]) => ({ sector, avgSurprise: sum / count, count }))
+      .sort((a, b) => b.avgSurprise - a.avgSurprise);
+  }, [items]);
+
+  const histogramData = useMemo((): HistogramBucket[] => {
+    return HISTOGRAM_BUCKETS.map((bucket) => ({
+      label: bucket.label,
+      isPositive: bucket.isPositive,
+      count: items.filter((item) => {
+        const pct = item.surprise * 100;
+        return pct > bucket.min && pct <= bucket.max;
+      }).length,
+    }));
+  }, [items]);
+
+  const scatterData = useMemo(() => {
+    return items
+      .filter((x) => x.latest_reaction != null)
+      .map((x) => ({
+        ticker: x.ticker,
+        company_name: x.company_name,
+        surprise: x.surprise * 100,
+        reaction: (x.latest_reaction as number) * 100,
+        sector: x.sector,
+      }));
+  }, [items]);
 
   const trimmedQuery = searchQuery.trim();
   const visibleItems =
@@ -79,10 +142,17 @@ export default function Home() {
         </section>
 
         {isLoading ? (
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 10 }).map((_, index) => (
-              <div key={index} className="h-24 animate-pulse rounded-2xl bg-surface" />
-            ))}
+          <section className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-20 animate-pulse rounded-2xl bg-surface" />
+              ))}
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 10 }).map((_, index) => (
+                <div key={index} className="h-24 animate-pulse rounded-2xl bg-surface" />
+              ))}
+            </div>
           </section>
         ) : null}
 
@@ -92,12 +162,57 @@ export default function Home() {
           </section>
         ) : null}
 
-        {!isLoading && !errorMessage ? (
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleItems.map((item) => (
-              <SurpriseCard key={item.ticker} item={item} />
-            ))}
+        {!isLoading && !errorMessage && items.length > 0 ? (
+          <section className="mb-8 space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-foreground">Season Analytics</h2>
+              <span className="text-xs text-zinc-500">{summaryStats.total} companies loaded</span>
+            </div>
+
+            <SummaryStatsBanner stats={summaryStats} />
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <div className="rounded-2xl border border-emerald-200 bg-white p-4">
+                <h3 className="mb-1 text-sm font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                  Avg Surprise by Sector
+                </h3>
+                <p className="mb-3 text-xs text-zinc-400">Which sectors are beating or missing analyst expectations</p>
+                <SectorSurpriseChart data={sectorData} />
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-white p-4">
+                <h3 className="mb-1 text-sm font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                  Surprise Distribution
+                </h3>
+                <p className="mb-3 text-xs text-zinc-400">How surprises are distributed across the S&amp;P 500</p>
+                <SurpriseHistogram data={histogramData} />
+              </div>
+            </div>
+
+            {scatterData.length > 0 ? (
+              <div className="rounded-2xl border border-emerald-200 bg-white p-4">
+                <h3 className="mb-1 text-sm font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                  Surprise vs. Market Reaction
+                </h3>
+                <p className="mb-3 text-xs text-zinc-400">
+                  {scatterData.length} companies with reaction data — each dot is a company, colored by sector
+                </p>
+                <SurpriseReactionScatter data={scatterData} />
+              </div>
+            ) : null}
           </section>
+        ) : null}
+
+        {!isLoading && !errorMessage ? (
+          <>
+            <h2 className="mb-3 text-xl font-bold text-foreground">
+              {trimmedQuery.length > 0 ? `Results for "${trimmedQuery}"` : "Top Movers"}
+            </h2>
+            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleItems.map((item) => (
+                <SurpriseCard key={item.ticker} item={item} />
+              ))}
+            </section>
+          </>
         ) : null}
 
         {!isLoading && !errorMessage && visibleItems.length === 0 ? (

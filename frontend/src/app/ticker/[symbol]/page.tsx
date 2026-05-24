@@ -4,10 +4,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import GeneratedProportionalityChart from "@/components/generated-proportionality-chart";
+import ReactionTimelineChart from "@/components/reaction-timeline-chart";
 import RegressionChart from "@/components/regression-chart";
 import {
+  getGeneratedProportionalityPlotData,
   getTickerProportionality,
   getTickerReaction,
+  type GeneratedProportionalityPlotResponse,
   type ProportionalityEndpointResponse,
   type RegressionModelValues,
   type ReactionEndpointResponse,
@@ -35,8 +39,19 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   const [proportionalityData, setProportionalityData] = useState<ProportionalityEndpointResponse | null>(null);
   const [reactionLoading, setReactionLoading] = useState(true);
   const [proportionalityLoading, setProportionalityLoading] = useState(true);
+  const [generatedPlotLoading, setGeneratedPlotLoading] = useState(true);
+  const [generatedPlotData, setGeneratedPlotData] = useState<GeneratedProportionalityPlotResponse | null>(null);
+  const [generatedPlotError, setGeneratedPlotError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [zRange, setZRange] = useState<number>(2);
   const searchParams = useSearchParams();
+
+  function computeXDomain(model: RegressionModelValues | null, surpriseVal: number | null, halfRange: number) {
+    if (!model || surpriseVal === null) return undefined;
+    const sd = model.surprise_sd || 1e-9;
+    const z = (surpriseVal - model.surprise_mean) / sd;
+    return [z - halfRange, z + halfRange] as [number, number];
+  }
 
   useEffect(() => {
     const run = async () => {
@@ -55,6 +70,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
         setErrorMessage("Missing filing date for this ticker.");
         setReactionLoading(false);
         setProportionalityLoading(false);
+        setGeneratedPlotLoading(false);
         return;
       }
 
@@ -81,11 +97,27 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
           setProportionalityLoading(false);
         }
       })();
+
+      const currentSector = searchParams.get("sector") ?? "";
+      if (!currentSector) {
+        setGeneratedPlotLoading(false);
+      } else {
+        void (async () => {
+          try {
+            const payload = await getGeneratedProportionalityPlotData(currentSector, currentFilingDate);
+            setGeneratedPlotData(payload);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to load generated plot";
+            setGeneratedPlotError(message);
+          } finally {
+            setGeneratedPlotLoading(false);
+          }
+        })();
+      }
     };
 
     void run();
   }, [params, searchParams]);
-
   const reactionRows = useMemo(() => {
     if (!reactionData) {
       return [] as Array<[string, number]>;
@@ -98,6 +130,14 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
 
     return Object.entries(firstEntry.reaction).sort((a, b) => a[0].localeCompare(b[0]));
   }, [reactionData]);
+
+    const timelineData = useMemo(() => {
+        return reactionRows.map(([date, car], i) => ({
+        label: `Day ${i + 1}`,
+        date,
+        car: car * 100,
+        }));
+    }, [reactionRows]);
 
   const latestReaction = useMemo(() => {
     if (reactionRows.length === 0) {
@@ -187,12 +227,39 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
               <h2 className="text-lg font-bold">Reaction and Proportionality Model</h2>
               {regressionModel ? (
                 <div className="mt-3">
+                  <div className="mb-3 flex items-center gap-3">
+                    <label className="text-sm text-zinc-700">z-range ±</label>
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={6}
+                      step={0.25}
+                      defaultValue={2}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setZRange(val);
+                      }}
+                    />
+                    <div className="ml-2 w-12 font-mono">±{zRange.toFixed(2)}</div>
+                    <div className="ml-4 flex gap-2">
+                      {[1, 2, 3].map((p) => (
+                        <button
+                          key={p}
+                          className="rounded bg-zinc-100 px-2 text-xs"
+                          onClick={() => setZRange(p)}
+                        >
+                          ±{p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <RegressionChart
                     model={regressionModel}
                     proportionality={proportionalityEntry ?? null}
                     surprise={surprise ?? 0}
                     latestReaction={latestReaction}
                     isLoading={reactionLoading || proportionalityLoading}
+                    xDomain={computeXDomain(regressionModel, surprise, zRange)}
                   />
                 </div>
               ) : proportionalityLoading ? (
@@ -203,7 +270,16 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
                 </p>
               )}
             </section>
-
+            {/* CAR Timeline Chart */}
+            <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
+              <h2 className="text-lg font-bold">Reaction Timeline (CAR %)</h2>
+              <p className="mt-1 text-xs text-zinc-500">
+                Cumulative Abnormal Return accumulating day-by-day after the filing date
+              </p>
+              <div className="mt-3">
+                <ReactionTimelineChart data={timelineData} isLoading={reactionLoading} />
+              </div>
+            </section>
             <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
               <h2 className="text-lg font-bold">Reaction Timeline</h2>
               {reactionLoading ? (
@@ -230,6 +306,24 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
               ) : null}
               {!reactionLoading && reactionRows.length === 0 ? (
                 <p className="mt-2 text-sm text-zinc-700">No reaction timeline data available.</p>
+              ) : null}
+            </section>
+
+            <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
+              <h2 className="text-lg font-bold">Generated Proportionality Plot (Interactive)</h2>
+              {generatedPlotLoading ? (
+                <div className="mt-3 h-72 animate-pulse rounded-2xl bg-surface" />
+              ) : null}
+              {!generatedPlotLoading && generatedPlotError ? (
+                <p className="mt-3 text-sm text-zinc-700">{generatedPlotError}</p>
+              ) : null}
+              {!generatedPlotLoading && !generatedPlotError && generatedPlotData ? (
+                <div className="mt-3">
+                  <GeneratedProportionalityChart data={generatedPlotData} />
+                </div>
+              ) : null}
+              {!generatedPlotLoading && !generatedPlotError && !generatedPlotData ? (
+                <p className="mt-3 text-sm text-zinc-700">No generated proportionality plot data available.</p>
               ) : null}
             </section>
           </>

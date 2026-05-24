@@ -312,6 +312,8 @@ def upsert_proportionality_model(
         (sector, filing_date, percent_surprise_mean, percent_surprise_sd, alpha, beta),
     )
 
+    db.commit()
+
 
 def get_dates_of_ticker(db: SQLiteDatabase, ticker: str) -> list[str]:
     rows = db.execute(

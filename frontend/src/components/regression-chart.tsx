@@ -72,10 +72,9 @@ export default function RegressionChart({
     expected: getExpectedCar(model, surprise),
   };
 
-  const widestModelRange = 4 * (model.surprise_sd + 1e-9);
-  const xExtent = Math.max(Math.abs(surprise), Math.abs(model.surprise_mean) + widestModelRange, 0.05);
-  const minX = surprise >= 0 ? 0 : -xExtent;
-  const maxX = surprise >= 0 ? xExtent : 0;
+  const halfRangeFromSurprise = Math.abs(surprise) * 1;
+  const minX: number = Math.min(surprise - halfRangeFromSurprise, 0);
+  const maxX: number = Math.max(surprise + halfRangeFromSurprise, 0);
 
   const linePoints = buildLinePoints(model, minX, maxX);
 

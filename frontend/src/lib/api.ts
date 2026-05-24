@@ -74,9 +74,87 @@ async function request<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function getSP500Surprises(): Promise<SP500TickerSnapshot[]> {
+// Local cache for surprises (simple localStorage with TTL)
+const SURPRISES_CACHE_KEY = "oxbow_sp500_surprises_v1";
+const SURPRISES_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+type SurprisesCache = {
+  ts: number;
+  items: SP500TickerSnapshot[];
+};
+
+function readSurprisesCache(): SP500TickerSnapshot[] | null {
+  try {
+    const raw = typeof window !== "undefined" ? window.localStorage.getItem(SURPRISES_CACHE_KEY) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SurprisesCache;
+    if (!parsed || !parsed.ts || !Array.isArray(parsed.items)) return null;
+    return parsed.items;
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeSurprisesCache(items: SP500TickerSnapshot[]) {
+  try {
+    const payload: SurprisesCache = { ts: Date.now(), items };
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(SURPRISES_CACHE_KEY, JSON.stringify(payload));
+    }
+  } catch (e) {
+    // ignore storage errors
+  }
+}
+
+function readSurprisesCacheMeta(): SurprisesCache | null {
+  try {
+    const raw = typeof window !== "undefined" ? window.localStorage.getItem(SURPRISES_CACHE_KEY) : null;
+    if (!raw) return null;
+    return JSON.parse(raw) as SurprisesCache;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchSP500SurprisesNetwork(): Promise<SP500TickerSnapshot[]> {
   const payload = await request<SP500SurprisesResponse>("/sp500/surprises");
+  writeSurprisesCache(payload.items);
   return payload.items;
+}
+
+export async function fetchSP500SurprisesFresh(): Promise<SP500TickerSnapshot[]> {
+  return fetchSP500SurprisesNetwork();
+}
+
+/**
+ * Get SP500 surprises. If a cached snapshot exists it is returned synchronously
+ * (resolved Promise) and a background refresh is started. Otherwise this waits
+ * for the network response and caches it.
+ */
+export async function getSP500Surprises(): Promise<SP500TickerSnapshot[]> {
+  const meta = readSurprisesCacheMeta();
+  if (meta && Array.isArray(meta.items)) {
+    // start background refresh but don't await
+    void fetchSP500SurprisesNetwork().catch(() => {
+      /* swallow */
+    });
+    return Promise.resolve(meta.items);
+  }
+
+  // no cache - fetch and cache
+  return fetchSP500SurprisesNetwork();
+}
+
+export function readLocalSurprisesCache(): SP500TickerSnapshot[] | null {
+  return readSurprisesCache();
+}
+
+export function clearSurprisesCache(): void {
+  try {
+    if (typeof window !== "undefined") window.localStorage.removeItem(SURPRISES_CACHE_KEY);
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 export async function getTickerDetails(

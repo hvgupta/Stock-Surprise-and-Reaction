@@ -49,7 +49,7 @@ uv venv
 ### 4. Run the application
 
 ```bash
-uv run fastapi run app/app.py
+uv run fastapi run backend/app.py
 ```
 
 ## How to use the API

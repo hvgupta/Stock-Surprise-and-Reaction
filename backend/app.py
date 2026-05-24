@@ -4,9 +4,9 @@ import dotenv
 from typing import cast
 from fastapi import FastAPI, Query
 
-from app.logger import get_configured_logger
-from app.sql_functions import SQLiteDatabase
-from app.model import ReactionRequest, PropotionateRequest
+from backend.logger import get_configured_logger
+from backend.sql_functions import SQLiteDatabase
+from backend.model import ReactionRequest, PropotionateRequest
 
 logger = get_configured_logger(__name__)
 

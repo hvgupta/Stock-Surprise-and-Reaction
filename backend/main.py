@@ -1,13 +1,13 @@
-from app.adapters import SP500_COMPANIES, get_earnings_history_of_ticker
-from app.logger import get_configured_logger
-from app.model import (
+from backend.adapters import SP500_COMPANIES, get_earnings_history_of_ticker
+from backend.logger import get_configured_logger
+from backend.model import (
     FilingReactionData,
     PropotionateRequest,
     ReactionRequest,
     SurpriseEndpointResponse,
     ReactionEndpointResponse,
 )
-from app.sql_functions import (
+from backend.sql_functions import (
     DateValues,
     SQLiteDatabase,
     get_ticker_proportionality_data,
@@ -16,7 +16,7 @@ from app.sql_functions import (
     ticker_in_db,
     upsert_proportionality_model,
 )
-from app.helper_functions import (
+from backend.helper_functions import (
     get_reaction_for_date,
     get_surprise_for_date,
     normalize_date_str,

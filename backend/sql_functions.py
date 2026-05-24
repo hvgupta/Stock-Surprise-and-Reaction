@@ -1,4 +1,4 @@
-from app.logger import get_configured_logger
+from backend.logger import get_configured_logger
 
 logger = get_configured_logger(__name__)
 

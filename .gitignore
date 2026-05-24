@@ -19,3 +19,5 @@ app.log
 **.next
 
 **.venv
+
+backend/generated_plots/**

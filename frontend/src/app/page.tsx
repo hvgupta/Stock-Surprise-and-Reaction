@@ -4,33 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 
 import SurpriseCard from "@/components/surprise-card";
-import { fetchSP500SurprisesFresh, readLocalSurprisesCache, type SP500TickerSnapshot } from "@/lib/api";
+import { fetchSP500SurprisesFresh, type SP500TickerSnapshot } from "@/lib/api";
 
 export default function Home() {
   const [items, setItems] = useState<SP500TickerSnapshot[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    const cached = readLocalSurprisesCache();
-    if (cached) {
-      setItems(cached);
-      setIsLoading(false);
-      setIsRefreshing(true);
-      void fetchSP500SurprisesFresh()
-        .then((fresh) => {
-          setItems(fresh);
-        })
-        .catch((err) => {
-          const message = err instanceof Error ? err.message : "Failed to refresh surprises";
-          setErrorMessage(message);
-        })
-        .finally(() => setIsRefreshing(false));
-      return;
-    }
-
     const run = async () => {
       try {
         const data = await fetchSP500SurprisesFresh();
@@ -93,7 +75,6 @@ export default function Home() {
             {trimmedQuery.length > 0
               ? `Showing fuzzy matches for "${trimmedQuery}"`
               : "Showing Top 12 by absolute surprise"}
-            {isRefreshing ? <span className="ml-3 inline-block text-xs text-zinc-500">Refreshing…</span> : null}
           </div>
         </section>
 

@@ -32,7 +32,13 @@ import asyncio
 import numpy as np
 from typing import Dict, List
 from fastapi import HTTPException
+from pathlib import Path
+import matplotlib
 
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+PLOT_OUTPUT_DIR = Path(__file__).resolve().parent / "generated_plots" / "proportionality"
 
 def _latest_entry(values: Dict[str, float]) -> tuple[str, float]:
     latest_key = sorted(values.keys())[-1]
@@ -50,6 +56,34 @@ def _company_details(ticker: str) -> tuple[str, str]:
     company_name = str(company_rows["Security"].values[0])
     sector = str(company_rows["GICS Sector"].values[0])
     return company_name, sector
+
+
+def _filter_outliers_iqr(
+    x_values: np.ndarray,
+) -> np.ndarray:
+    if len(x_values) < 4:
+        return np.ones(len(x_values), dtype=bool)
+
+    x_q1, x_q3 = np.percentile(x_values, [25, 75])
+
+    x_iqr = x_q3 - x_q1
+
+    if x_iqr <= 0:
+        return np.ones(len(x_values), dtype=bool)
+
+    x_mask = np.ones(len(x_values), dtype=bool)
+
+    if x_iqr > 0:
+        x_lower = x_q1 - 1.5 * x_iqr
+        x_upper = x_q3 + 1.5 * x_iqr
+        x_mask = (x_values >= x_lower) & (x_values <= x_upper)
+
+
+    mask = x_mask
+    if int(mask.sum()) < 2:
+        return np.ones(len(x_values), dtype=bool)
+
+    return mask
 
 
 async def _compute_proportionality_model_for_ticker(
@@ -92,16 +126,77 @@ async def _compute_proportionality_model_for_ticker(
 
     model_dict: DateValues[tuple[float, float, float, float]] = {}
     for date in Y.keys():
-        normalized_x, x_mean, x_sd = normalize_x(unnormalized_x[date])
+        # perform outlier filtering on raw surprise values before normalization
+        x_raw = np.array(unnormalized_x[date], dtype=np.float64)
         filing_y = np.array(Y[date], dtype=np.float64)
-        beta, alpha = np.polyfit(normalized_x, filing_y, deg=1)
+
+        fit_mask = _filter_outliers_iqr(x_raw)
+        filtered_raw = x_raw[fit_mask]
+        filtered_y = filing_y[fit_mask]
+
+        if len(filtered_raw) == 0:
+            logger.warning(
+                f"No inlier samples after filtering for sector {sector} on date {date}; skipping"
+            )
+            continue
+
+        # normalize using only the filtered (inlier) raw surprises
+        normalized_filtered_x, x_mean, x_sd = normalize_x(filtered_raw.tolist())
+        beta, alpha = np.polyfit(normalized_filtered_x, filtered_y, deg=1)
 
         logger.info(
             f"Proportionality model for sector {sector} on date {date}: "
-            f"alpha={alpha}, beta={beta}, x_mean={x_mean}, x_sd={x_sd}, num_samples={len(filing_y)}"
+            f"alpha={alpha}, beta={beta}, x_mean={x_mean}, x_sd={x_sd}, num_samples={len(filing_y)}, filtered_samples={len(filtered_y)}"
         )
         upsert_proportionality_model(db, sector, date, x_mean, x_sd, alpha, beta)
         model_dict[date] = (x_mean, x_sd, alpha, beta)
+
+        if len(unnormalized_x[date]) == 0:
+            logger.warning(
+                f"Skipping plot export for sector {sector} on date {date}: no samples available"
+            )
+            continue
+
+        # compute z-scores for all raw values using the inlier mean/sd so excluded
+        # points appear in the same normalized coordinate system as the fit
+        if x_sd == 0:
+            x_sd = 1e-9
+        x_values = normalized_filtered_x
+        y_values = filtered_y
+        x_min = float(np.min(x_values))
+        x_max = float(np.max(x_values))
+        if x_min == x_max:
+            x_min -= 0.01
+            x_max += 0.01
+
+        x_line = np.linspace(x_min, x_max, 200)
+        y_line = alpha + beta * x_line
+
+        plot_dir = PLOT_OUTPUT_DIR / sector.replace("/", "_")
+        plot_dir.mkdir(parents=True, exist_ok=True)
+        plot_path = plot_dir / f"{date}.png"
+
+        fig, ax = plt.subplots(figsize=(8, 5), dpi=150)
+        ax.scatter(
+            x_values,
+            y_values,
+            color="black",
+            s=22,
+            alpha=0.85,
+            label="Data points",
+        )
+        ax.plot(x_line, y_line, color="red", linewidth=2.5, label="Regression line")
+        ax.axhline(0, color="#9ca3af", linewidth=1, linestyle="--")
+        ax.axvline(0, color="#9ca3af", linewidth=1, linestyle="--")
+        ax.set_title(f"{sector} proportionality on {date}")
+        ax.set_xlabel("Surprise z-score")
+        ax.set_ylabel("CAR / Reaction")
+        ax.legend(loc="best")
+        ax.grid(True, linestyle=":", linewidth=0.8, alpha=0.5)
+        fig.tight_layout()
+        fig.savefig(plot_path, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"Saved proportionality plot to {plot_path}")
 
     return model_dict
 

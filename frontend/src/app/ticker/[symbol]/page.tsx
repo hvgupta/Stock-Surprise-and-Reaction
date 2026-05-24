@@ -185,17 +185,18 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
 
             <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
               <h2 className="text-lg font-bold">Reaction and Proportionality Model</h2>
-              {proportionalityLoading ? (
-                <div className="mt-3 h-72 animate-pulse rounded-2xl bg-surface" />
-              ) : regressionModel ? (
+              {regressionModel ? (
                 <div className="mt-3">
                   <RegressionChart
                     model={regressionModel}
                     proportionality={proportionalityEntry ?? null}
                     surprise={surprise ?? 0}
                     latestReaction={latestReaction}
+                    isLoading={reactionLoading || proportionalityLoading}
                   />
                 </div>
+              ) : proportionalityLoading ? (
+                <div className="mt-3 h-72 animate-pulse rounded-2xl bg-surface" />
               ) : (
                 <p className="mt-3 text-sm text-zinc-700">
                   Regression model is unavailable for {symbol} and this filing date.

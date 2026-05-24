@@ -20,10 +20,11 @@ type RegressionChartProps = {
   proportionality: ProportionalityValues | null;
   surprise: number;
   latestReaction: number | null;
+  isLoading?: boolean;
 };
 
 type RegressionPoint = {
-  surprise: number;
+  zScore: number;
   expected: number;
 };
 
@@ -32,21 +33,24 @@ function getExpectedCar(model: RegressionModelValues, surprise: number): number 
   return model.alpha + model.beta * z;
 }
 
+function getSurpriseZScore(model: RegressionModelValues, surprise: number): number {
+  return (surprise - model.surprise_mean) / (model.surprise_sd + 1e-9);
+}
+
 function buildLinePoints(
   model: RegressionModelValues,
-  minSurprise: number,
-  maxSurprise: number,
+  minZScore: number,
+  maxZScore: number,
 ): RegressionPoint[] {
-  const clampedMinSurprise = Math.min(minSurprise, maxSurprise);
-  const clampedMaxSurprise = Math.max(minSurprise, maxSurprise);
+  const clampedMinZScore = Math.min(minZScore, maxZScore);
+  const clampedMaxZScore = Math.max(minZScore, maxZScore);
 
   return Array.from({ length: 40 }, (_, index) => {
     const ratio = index / 39;
-    const currentSurprise =
-      clampedMinSurprise + (clampedMaxSurprise - clampedMinSurprise) * ratio;
+    const currentZScore = clampedMinZScore + (clampedMaxZScore - clampedMinZScore) * ratio;
     return {
-      surprise: currentSurprise,
-      expected: getExpectedCar(model, currentSurprise),
+      zScore: currentZScore,
+      expected: model.alpha + model.beta * currentZScore,
     };
   });
 }
@@ -62,19 +66,33 @@ export default function RegressionChart({
   proportionality,
   surprise,
   latestReaction,
+  isLoading = false,
 }: RegressionChartProps) {
+  if (isLoading) {
+    return (
+      <div className="flex h-80 w-full items-center justify-center rounded-2xl border border-teal-200 bg-white p-3 shadow-sm">
+        <div className="w-full space-y-3">
+          <div className="h-5 w-40 animate-pulse rounded bg-surface" />
+          <div className="h-64 animate-pulse rounded-2xl bg-surface" />
+          <p className="text-center text-sm text-zinc-600">Loading graph...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const surpriseZScore = getSurpriseZScore(model, surprise);
   const actualPoint = {
-    surprise,
+    zScore: surpriseZScore,
     actual: latestReaction ?? proportionality?.actual_CAR ?? 0,
   };
   const expectedPoint = {
-    surprise,
+    zScore: surpriseZScore,
     expected: getExpectedCar(model, surprise),
   };
 
-  const halfRangeFromSurprise = Math.abs(surprise) * 1;
-  const minX: number = Math.min(surprise - halfRangeFromSurprise, 0);
-  const maxX: number = Math.max(surprise + halfRangeFromSurprise, 0);
+  const halfRangeFromZScore = Math.max(Math.abs(surpriseZScore) * 0.5, 0.5);
+  const minX: number = surpriseZScore - halfRangeFromZScore;
+  const maxX: number = surpriseZScore + halfRangeFromZScore;
 
   const linePoints = buildLinePoints(model, minX, maxX);
 
@@ -91,13 +109,13 @@ export default function RegressionChart({
         <ComposedChart margin={{ top: 16, right: 16, bottom: 16, left: 4 }} data={linePoints}>
           <CartesianGrid strokeDasharray="4 4" stroke="#d8e6df" />
           <XAxis
-            dataKey="surprise"
+            dataKey="zScore"
             type="number"
             domain={[minX, maxX]}
-            tickFormatter={(value: number) => `${(value * 100).toFixed(1)}%`}
+            tickFormatter={(value: number) => value.toFixed(2)}
             stroke="#1f2937"
           >
-            <Label value="Surprise" offset={-4} position="insideBottom" />
+            <Label value="Surprise z-score" offset={-4} position="insideBottom" />
           </XAxis>
           <YAxis
             type="number"
@@ -109,7 +127,7 @@ export default function RegressionChart({
           </YAxis>
           <Tooltip
             formatter={(value: number) => `${(value * 100).toFixed(2)}%`}
-            labelFormatter={(value: number) => `Surprise ${(value * 100).toFixed(2)}%`}
+            labelFormatter={(value: number) => `z-score ${value.toFixed(3)}`}
           />
           <Line
             dataKey="expected"
@@ -121,14 +139,14 @@ export default function RegressionChart({
           />
           <ReferenceLine
             segment={[
-              { x: expectedPoint.surprise, y: expectedPoint.expected },
-              { x: actualPoint.surprise, y: actualPoint.actual },
+              { x: expectedPoint.zScore, y: expectedPoint.expected },
+              { x: actualPoint.zScore, y: actualPoint.actual },
             ]}
             stroke="#6b7280"
             strokeDasharray="4 4"
           />
           <ReferenceDot
-            x={expectedPoint.surprise}
+            x={expectedPoint.zScore}
             y={expectedPoint.expected}
             r={7}
             fill="#111827"
@@ -138,7 +156,7 @@ export default function RegressionChart({
             ifOverflow="extendDomain"
           />
           <ReferenceDot
-            x={actualPoint.surprise}
+            x={actualPoint.zScore}
             y={actualPoint.actual}
             r={7}
             fill="#2563eb"

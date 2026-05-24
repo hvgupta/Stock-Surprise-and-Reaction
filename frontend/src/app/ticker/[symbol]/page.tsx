@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import GeneratedProportionalityChart from "@/components/generated-proportionality-chart";
 import LoadingSpinner from "@/components/loading-spinner";
+import ProportionalityComparisonChart from "@/components/proportionality-comparison-chart";
 import ReactionTimelineChart from "@/components/reaction-timeline-chart";
 import RegressionChart from "@/components/regression-chart";
 import {
@@ -158,6 +159,9 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   }, [proportionalityData]);
 
   const regressionModel: RegressionModelValues | null = proportionalityEntry?.regression_model ?? null;
+  const actualCAR = proportionalityEntry?.actual_CAR ?? null;
+  const expectedCAR = proportionalityEntry?.expected_CAR ?? null;
+  const pctDiffFromExpected = proportionalityEntry?.pct_diff_from_expected ?? null;
 
   return (
     <div className="pb-10 pt-8">
@@ -223,6 +227,16 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
                 </p>
               </article>
             </section>
+
+            {actualCAR !== null && expectedCAR !== null && pctDiffFromExpected !== null ? (
+              <section className="mt-5">
+                <ProportionalityComparisonChart
+                  actualCAR={actualCAR}
+                  expectedCAR={expectedCAR}
+                  pctDiffFromExpected={pctDiffFromExpected}
+                />
+              </section>
+            ) : null}
 
             <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
               <h2 className="text-lg font-bold">Reaction and Proportionality Model</h2>

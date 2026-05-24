@@ -19,6 +19,8 @@ export type HistogramBucket = {
 
 type SurpriseHistogramProps = {
   data: HistogramBucket[];
+  selectedBucket?: string | null;
+  onBucketClick?: (bucketLabel: string) => void;
 };
 
 type TooltipPayloadEntry = {
@@ -46,7 +48,7 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   );
 }
 
-export default function SurpriseHistogram({ data }: SurpriseHistogramProps) {
+export default function SurpriseHistogram({ data, selectedBucket = null, onBucketClick }: SurpriseHistogramProps) {
   if (data.length === 0) {
     return (
       <div className="flex h-56 items-center justify-center text-sm text-zinc-500">
@@ -56,7 +58,7 @@ export default function SurpriseHistogram({ data }: SurpriseHistogramProps) {
   }
 
   return (
-    <div className="h-56">
+    <div className={selectedBucket ? "h-56 rounded-2xl border border-emerald-500 shadow-md" : "h-56"}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 4, right: 8, bottom: 40, left: 8 }}>
           <CartesianGrid strokeDasharray="4 4" stroke="#d8e6df" vertical={false} />
@@ -80,7 +82,11 @@ export default function SurpriseHistogram({ data }: SurpriseHistogramProps) {
               <Cell
                 key={index}
                 fill={entry.isPositive ? "#166534" : "#b91c1c"}
-                fillOpacity={0.8}
+                fillOpacity={selectedBucket && selectedBucket !== entry.label ? 0.22 : 0.9}
+                stroke={selectedBucket === entry.label ? "#059669" : "transparent"}
+                strokeWidth={selectedBucket === entry.label ? 2 : 0}
+                cursor={onBucketClick ? "pointer" : "default"}
+                onClick={() => onBucketClick?.(entry.label)}
               />
             ))}
           </Bar>

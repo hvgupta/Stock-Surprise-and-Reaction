@@ -20,6 +20,8 @@ export type SectorBarDatum = {
 
 type SectorSurpriseChartProps = {
   data: SectorBarDatum[];
+  selectedSector?: string | null;
+  onSectorClick?: (sector: string) => void;
 };
 
 type TooltipPayloadEntry = {
@@ -50,7 +52,7 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   );
 }
 
-export default function SectorSurpriseChart({ data }: SectorSurpriseChartProps) {
+export default function SectorSurpriseChart({ data, selectedSector = null, onSectorClick }: SectorSurpriseChartProps) {
   if (data.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-zinc-500">
@@ -62,7 +64,7 @@ export default function SectorSurpriseChart({ data }: SectorSurpriseChartProps) 
   const chartHeight = Math.max(data.length * 42, 280);
 
   return (
-    <div style={{ height: chartHeight }}>
+    <div className={selectedSector ? "rounded-2xl border border-emerald-500 shadow-md" : "rounded-2xl border border-transparent"} style={{ height: chartHeight }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
           layout="vertical"
@@ -90,7 +92,11 @@ export default function SectorSurpriseChart({ data }: SectorSurpriseChartProps) 
               <Cell
                 key={index}
                 fill={entry.avgSurprise >= 0 ? "#166534" : "#b91c1c"}
-                fillOpacity={0.85}
+                fillOpacity={selectedSector && selectedSector !== entry.sector ? 0.22 : 0.9}
+                stroke={selectedSector === entry.sector ? "#059669" : "transparent"}
+                strokeWidth={selectedSector === entry.sector ? 2 : 0}
+                cursor={onSectorClick ? "pointer" : "default"}
+                onClick={() => onSectorClick?.(entry.sector)}
               />
             ))}
           </Bar>

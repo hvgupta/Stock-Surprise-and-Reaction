@@ -193,7 +193,7 @@ export default function RegressionChart({
             stroke="#6b7280"
             strokeDasharray="4 4"
           />
-            <ReferenceLine
+            {/* <ReferenceLine
               segment={[
                 { x: 0, y: expectedPoint.expected },
                 { x: expectedPoint.zScore, y: expectedPoint.expected },
@@ -208,7 +208,7 @@ export default function RegressionChart({
               ]}
               stroke="#2563eb"
               strokeDasharray="3 3"
-            />
+            /> */}
             <ReferenceDot
               x={expectedPoint.zScore}
               y={expectedPoint.expected}

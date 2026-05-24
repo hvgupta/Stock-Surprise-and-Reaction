@@ -133,6 +133,9 @@ export default function GeneratedProportionalityChart({ data, xDomain }: Generat
             <span className="text-sm leading-none text-zinc-500">✕</span> Excluded outliers
           </span>
         </div>
+        <p className="mt-2 text-zinc-600">
+          Gray outlier points are shown for context, but they are excluded when fitting the regression model.
+        </p>
       </div>
 
       <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono text-zinc-700">

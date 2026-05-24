@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import GeneratedProportionalityChart from "@/components/generated-proportionality-chart";
+import LoadingSpinner from "@/components/loading-spinner";
 import ReactionTimelineChart from "@/components/reaction-timeline-chart";
 import RegressionChart from "@/components/regression-chart";
 import {
@@ -162,13 +163,13 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
     <div className="pb-10 pt-8">
       <main className="page-shell">
         <Link href="/" className="text-sm font-semibold text-brand hover:underline">
-          Back to Top 10 / Search
+          ← Back to Top 10 / Search
         </Link>
 
         {reactionLoading || proportionalityLoading ? (
-          <section className="mt-4 space-y-3">
-            <div className="h-28 animate-pulse rounded-2xl bg-surface" />
-            <div className="h-72 animate-pulse rounded-2xl bg-surface" />
+          <section className="mt-4 grid gap-3 md:grid-cols-2">
+            <LoadingSpinner label="Loading reaction data..." className="min-h-28" />
+            <LoadingSpinner label="Loading proportionality data..." className="min-h-72" />
           </section>
         ) : null}
 
@@ -311,9 +312,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
 
             <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
               <h2 className="text-lg font-bold">Generated Proportionality Plot (Interactive)</h2>
-              {generatedPlotLoading ? (
-                <div className="mt-3 h-72 animate-pulse rounded-2xl bg-surface" />
-              ) : null}
+              {generatedPlotLoading ? <LoadingSpinner label="Loading generated plot..." className="mt-3 min-h-72" /> : null}
               {!generatedPlotLoading && generatedPlotError ? (
                 <p className="mt-3 text-sm text-zinc-700">{generatedPlotError}</p>
               ) : null}

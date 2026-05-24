@@ -52,6 +52,20 @@ uv venv
 uv run fastapi run backend/app.py
 ```
 
+### 5. Run the Next.js frontend
+
+```bash
+cd frontend
+npm install
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+Then open:
+
+```text
+http://localhost:3000
+```
+
 ## How to use the API
 
 ### Browser UI
@@ -70,6 +84,12 @@ curl "http://localhost:8000/AAPL/surprise?date=2024-10-25"
 
 # Reaction / CAR example
 curl "http://localhost:8000/AAPL/reaction?filings_date=2024-10-25&reaction_days_threshold=3"
+
+# SP500 top surprises (sorted by absolute surprise)
+curl "http://localhost:8000/sp500/surprises"
+
+# SP500 ticker detail payload (reaction + proportionality + regression model)
+curl "http://localhost:8000/sp500/AAPL/details"
 ```
 
 To install a development dependency, use the same command with the package name you need for local work.

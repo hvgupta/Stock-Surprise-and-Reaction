@@ -3,9 +3,12 @@ from backend.logger import get_configured_logger
 from backend.model import (
     FilingReactionData,
     PropotionateRequest,
+    ProportionalityResponseEntry,
     ReactionRequest,
-    SurpriseEndpointResponse,
     ReactionEndpointResponse,
+    SP500SurprisesResponse,
+    SP500TickerSnapshot,
+    SurpriseEndpointResponse,
 )
 from backend.sql_functions import (
     DateValues,
@@ -31,6 +34,24 @@ from typing import Dict, List
 from fastapi import HTTPException
 
 
+def _latest_entry(values: Dict[str, float]) -> tuple[str, float]:
+    latest_key = sorted(values.keys())[-1]
+    return latest_key, float(values[latest_key])
+
+
+def _company_details(ticker: str) -> tuple[str, str]:
+    company_rows = SP500_COMPANIES[SP500_COMPANIES["Symbol"] == ticker]
+    if len(company_rows) == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"ticker {ticker} not found in S&P 500 list",
+        )
+
+    company_name = str(company_rows["Security"].values[0])
+    sector = str(company_rows["GICS Sector"].values[0])
+    return company_name, sector
+
+
 async def _compute_proportionality_model_for_ticker(
     db: SQLiteDatabase,
     sector: str,
@@ -47,10 +68,14 @@ async def _compute_proportionality_model_for_ticker(
                 ReactionRequest(reaction_days_threshold=3, surprise_threshold=0),
             )
             for ticker in tickers
-        ]
+        ],
+        return_exceptions=True, 
     )
 
     for reaction_data in reaction_results:
+        if isinstance(reaction_data, BaseException):
+            logger.warning(f"Skipping a ticker due to error in fetching reaction data: {reaction_data}")
+            continue
         for filing_date, filing_reaction_data in reaction_data["reaction_data"].items():
             if isinstance(filing_reaction_data["reaction"], str):
                 continue
@@ -303,7 +328,7 @@ async def fetch_proportionality_for_ticker(
         else list(proportionality_data.keys())
     )
 
-    pct_diff_dict: DateValues[Dict[str, float]] = {}
+    pct_diff_dict: DateValues[ProportionalityResponseEntry] = {}
     for date in valid_dates:
         actual_surprise, actual_CAR = (
             await fetch_surprise_and_latest_reaction(db, ticker, date)
@@ -325,6 +350,59 @@ async def fetch_proportionality_for_ticker(
             "pct_diff_from_expected": (actual_CAR - expected_CAR) / expected_CAR,
             "expected_CAR": expected_CAR,
             "actual_CAR": actual_CAR,
+            "regression_model": {
+                "surprise_mean": float(surpirse_mean),
+                "surprise_sd": float(surprise_sd),
+                "alpha": float(alpha),
+                "beta": float(beta),
+            },
         }
 
     return pct_diff_dict
+
+
+async def _build_snapshot_for_ticker(
+    db: SQLiteDatabase,
+    ticker: str,
+    semaphore: asyncio.Semaphore,
+) -> SP500TickerSnapshot | None:
+    async with semaphore:
+        try:
+            surprise_payload = await fetch_surprise_for_ticker(db, ticker, filing_date=None)
+            if len(surprise_payload["surprise"]) == 0:
+                return None
+
+            filing_date, surprise = _latest_entry(surprise_payload["surprise"])
+            company_name, sector = _company_details(ticker)
+            return {
+                "ticker": ticker,
+                "company_name": company_name,
+                "sector": sector,
+                "filing_date": filing_date,
+                "surprise": surprise,
+            }
+        except Exception as exc:
+            logger.warning(f"Skipping ticker {ticker}; unable to build snapshot: {exc}")
+            return None
+
+
+async def fetch_sp500_surprises(
+    db: SQLiteDatabase,
+    limit: int | None = None,
+) -> SP500SurprisesResponse:
+    tickers: list[str] = SP500_COMPANIES["Symbol"].dropna().astype(str).tolist()
+    semaphore = asyncio.Semaphore(12)
+    snapshots = await asyncio.gather(
+        *[_build_snapshot_for_ticker(db, ticker, semaphore) for ticker in tickers]
+    )
+
+    valid_snapshots = [snapshot for snapshot in snapshots if snapshot is not None]
+    valid_snapshots.sort(key=lambda row: abs(row["surprise"]), reverse=True)
+
+    if limit is not None:
+        valid_snapshots = valid_snapshots[:limit]
+
+    return {
+        "count": len(valid_snapshots),
+        "items": valid_snapshots,
+    }

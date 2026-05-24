@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import dotenv
 from typing import cast
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.logger import get_configured_logger
 from backend.sql_functions import SQLiteDatabase
@@ -25,12 +26,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 from . import main as handlers
 
 @app.get("/health")
 async def health_check():
     return await handlers.health_check()
+
+
+@app.get("/sp500/surprises")
+async def fetch_sp500_surprises(limit: int | None = Query(default=None, ge=1)):
+    db = cast(SQLiteDatabase, app.state.database)
+    return await handlers.fetch_sp500_surprises(db, limit)
 
 @app.get("/{ticker}/surprise")
 async def fetch_surprise_for_ticker(ticker: str, filing_date: str | None = Query(default=None)):

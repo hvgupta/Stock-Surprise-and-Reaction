@@ -1,6 +1,6 @@
 from fastapi import Query
 from pydantic import BaseModel, model_validator
-from typing import Dict, Optional, TypedDict, Union, overload
+from typing import Dict, NotRequired, Optional, TypedDict, Union, overload
 
 SURPRISE_THRESHOLD = 0.03
 
@@ -45,3 +45,32 @@ class FilingReactionData(TypedDict):
 class ReactionEndpointResponse(TypedDict):
     ticker: str
     reaction_data: Dict[str, FilingReactionData]
+
+
+class SP500TickerSnapshot(TypedDict):
+    ticker: str
+    company_name: str
+    sector: str
+    filing_date: str
+    surprise: float
+    latest_reaction: NotRequired[Optional[float]]
+
+
+class SP500SurprisesResponse(TypedDict):
+    count: int
+    items: list[SP500TickerSnapshot]
+
+
+
+class RegressionModelValues(TypedDict):
+    surprise_mean: float
+    surprise_sd: float
+    alpha: float
+    beta: float
+
+
+class ProportionalityResponseEntry(TypedDict):
+    pct_diff_from_expected: float
+    expected_CAR: float
+    actual_CAR: float
+    regression_model: RegressionModelValues

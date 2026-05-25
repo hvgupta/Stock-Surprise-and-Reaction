@@ -1,68 +1,84 @@
 <#
-run-dev.ps1 — start backend (uvicorn) and frontend (npm) on Windows (PowerShell)
-Usage: Open PowerShell in the `oxbow` folder and run `.
-run-dev.ps1`
+run-dev.ps1 - start backend and frontend on Windows (PowerShell)
 #>
 
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-Set-Location $scriptDir
+$backendDir = Join-Path $scriptDir 'backend'
+$frontendDir = Join-Path $scriptDir 'frontend'
 
-Write-Host "Starting backend..."
-Set-Location (Join-Path $scriptDir 'backend')
+Set-Location $scriptDir
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Error "Python not found in PATH. Install Python and ensure 'python' is available."
     exit 1
 }
 
-# Prefer 'uv' CLI per README
+Write-Host "Starting backend..."
+Set-Location $backendDir
+
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    Write-Host "Found 'uv' CLI — using it to run backend"
-    $backendProc = Start-Process -FilePath uv -ArgumentList 'run', 'fastapi', 'run', 'app.py' -PassThru
-    Write-Host "Backend started via uv (pid: $($backendProc.Id))"
+    Write-Host "Found 'uv' CLI - using it to run backend"
+    $backendCommand = { uv run fastapi run backend\app.py }
 } else {
-    # ensure venv exists
-    $venvDir = Join-Path $scriptDir 'backend' | Split-Path -Parent
-    if (-not (Test-Path -Path (Join-Path (Join-Path $scriptDir 'backend') '.venv'))) {
+    $venvDir = Join-Path $backendDir '.venv'
+    $pythonExe = Join-Path $venvDir 'Scripts\python.exe'
+
+    if (-not (Test-Path $pythonExe)) {
         Write-Host "Creating virtualenv at backend\.venv"
-        python -m venv .venv
+        & python -m venv $venvDir
     }
 
-    $pythonExe = Join-Path (Join-Path $scriptDir 'backend') '.venv\Scripts\python.exe'
-    if (-not (Test-Path $pythonExe)) { $pythonExe = 'python' }
+    if (-not (Test-Path $pythonExe)) {
+        $pythonExe = 'python'
+    }
 
-    # ensure uvicorn installed in venv
+    # If we created (or already have) a backend virtualenv, install project dependencies into it
+    if (Test-Path $venvDir) {
+        Write-Host "Installing project dependencies into backend virtualenv..."
+        & $pythonExe -m pip install --upgrade pip
+        & $pythonExe -m pip install -e $scriptDir
+    }
+
     try {
-        & $pythonExe -c "import uvicorn" 2>$null
+        & $pythonExe -c 'import uvicorn' 2>$null
     } catch {
         Write-Host "Installing uvicorn into virtualenv..."
         & $pythonExe -m pip install --upgrade pip
         & $pythonExe -m pip install 'uvicorn[standard]'
     }
 
-    $backendProc = Start-Process -FilePath $pythonExe -ArgumentList '-m', 'uvicorn', 'backend.app:app', '--reload', '--port', '8000' -PassThru
-    Write-Host "Backend started (pid: $($backendProc.Id))"
+    try {
+        & $pythonExe -c 'import fastapi' 2>$null
+    } catch {
+        Write-Host "Installing fastapi into virtualenv..."
+        & $pythonExe -m pip install 'fastapi[standard]'
+    }
+
+    $backendCommand = { & $pythonExe -m uvicorn backend.app:app --reload --port 8000 }
 }
 
-Set-Location (Join-Path $scriptDir 'frontend')
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     Write-Error "npm not found in PATH. Install Node.js and npm."
-    Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue
     exit 1
 }
 
+Set-Location $frontendDir
+
 Write-Host "Starting frontend..."
-$frontendProc = Start-Process -FilePath npm -ArgumentList 'run', 'dev' -PassThru
+$npmExe = (Get-Command npm.cmd).Source
+$frontendProc = Start-Process -FilePath $npmExe -ArgumentList @('run', 'dev') -WorkingDirectory $frontendDir -PassThru
 Write-Host "Frontend started (pid: $($frontendProc.Id))"
 
-Write-Host "Both processes are running. Press Ctrl+C to stop."
-
 try {
-    while ($true) { Start-Sleep -Seconds 1 }
+    Write-Host "Starting backend in the foreground. Press Ctrl+C to stop."
+    # Ensure the backend is started from the repository root so the `backend` package is importable
+    Set-Location $scriptDir
+    & $backendCommand
 } finally {
     Write-Host "Stopping processes..."
-    if ($frontendProc -and -not $frontendProc.HasExited) { Stop-Process -Id $frontendProc.Id -Force -ErrorAction SilentlyContinue }
-    if ($backendProc -and -not $backendProc.HasExited) { Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue }
+    if ($frontendProc -and -not $frontendProc.HasExited) {
+        Stop-Process -Id $frontendProc.Id -Force -ErrorAction SilentlyContinue
+    }
 }

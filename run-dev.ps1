@@ -1,7 +1,7 @@
 <#
 run-dev.ps1 — start backend (uvicorn) and frontend (npm) on Windows (PowerShell)
 Usage: Open PowerShell in the `oxbow` folder and run `.
-un-dev.ps1`
+run-dev.ps1`
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -17,9 +17,34 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# Start uvicorn as a process
-$backendProc = Start-Process -FilePath python -ArgumentList '-m', 'uvicorn', 'backend.app:app', '--reload', '--port', '8000' -PassThru
-Write-Host "Backend started (pid: $($backendProc.Id))"
+# Prefer 'uv' CLI per README
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    Write-Host "Found 'uv' CLI — using it to run backend"
+    $backendProc = Start-Process -FilePath uv -ArgumentList 'run', 'fastapi', 'run', 'app.py' -PassThru
+    Write-Host "Backend started via uv (pid: $($backendProc.Id))"
+} else {
+    # ensure venv exists
+    $venvDir = Join-Path $scriptDir 'backend' | Split-Path -Parent
+    if (-not (Test-Path -Path (Join-Path (Join-Path $scriptDir 'backend') '.venv'))) {
+        Write-Host "Creating virtualenv at backend\.venv"
+        python -m venv .venv
+    }
+
+    $pythonExe = Join-Path (Join-Path $scriptDir 'backend') '.venv\Scripts\python.exe'
+    if (-not (Test-Path $pythonExe)) { $pythonExe = 'python' }
+
+    # ensure uvicorn installed in venv
+    try {
+        & $pythonExe -c "import uvicorn" 2>$null
+    } catch {
+        Write-Host "Installing uvicorn into virtualenv..."
+        & $pythonExe -m pip install --upgrade pip
+        & $pythonExe -m pip install 'uvicorn[standard]'
+    }
+
+    $backendProc = Start-Process -FilePath $pythonExe -ArgumentList '-m', 'uvicorn', 'backend.app:app', '--reload', '--port', '8000' -PassThru
+    Write-Host "Backend started (pid: $($backendProc.Id))"
+}
 
 Set-Location (Join-Path $scriptDir 'frontend')
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {

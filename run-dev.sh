@@ -11,15 +11,33 @@ cd "$ROOT_DIR"
 echo "Starting backend..."
 cd backend
 
-if ! command -v uvicorn >/dev/null 2>&1; then
-  echo "uvicorn not found. Install it with: pip install 'uvicorn[standard]'"
-  exit 1
-fi
+# Prefer 'uv' if available (per README). Otherwise create/activate a venv and run uvicorn.
+if command -v uv >/dev/null 2>&1; then
+  echo "Found 'uv' CLI — using it to run backend"
+  uv run fastapi run app.py &
+  BACKEND_PID=$!
+  echo "Backend started via uv (pid: $BACKEND_PID)"
+else
+  # create venv if missing
+  if [ ! -d ".venv" ]; then
+    echo "Creating virtualenv at backend/.venv"
+    python3 -m venv .venv
+  fi
 
-# start backend in background and capture pid
-uvicorn backend.app:app --reload --port 8000 &
-BACKEND_PID=$!
-echo "Backend started (pid: $BACKEND_PID)"
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+
+  # ensure uvicorn is installed in venv
+  if ! python -c "import uvicorn" >/dev/null 2>&1; then
+    echo "Installing uvicorn into virtualenv..."
+    python -m pip install --upgrade pip
+    python -m pip install 'uvicorn[standard]'
+  fi
+
+  python -m uvicorn backend.app:app --reload --port 8000 &
+  BACKEND_PID=$!
+  echo "Backend started (pid: $BACKEND_PID)"
+fi
 
 cd "$ROOT_DIR/frontend"
 

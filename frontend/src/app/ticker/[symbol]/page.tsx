@@ -340,32 +340,6 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
               <h2 className="text-lg font-bold">Reaction and Proportionality Model</h2>
               {regressionModel ? (
                 <div className="mt-3">
-                  <div className="mb-3 flex items-center gap-3">
-                    <label className="text-sm text-zinc-700">z-range ±</label>
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={6}
-                      step={0.25}
-                      defaultValue={2}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setZRange(val);
-                      }}
-                    />
-                    <div className="ml-2 w-12 font-mono">±{zRange.toFixed(2)}</div>
-                    <div className="ml-4 flex gap-2">
-                      {[1, 2, 3].map((p) => (
-                        <button
-                          key={p}
-                          className="rounded bg-zinc-100 px-2 text-xs"
-                          onClick={() => setZRange(p)}
-                        >
-                          ±{p}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                   {generatedPlotData ? (
                     <CombinedProportionalityReactionChart
                       generated={generatedPlotData}

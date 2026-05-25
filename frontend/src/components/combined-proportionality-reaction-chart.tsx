@@ -28,6 +28,7 @@ type Props = {
   proportionality: ProportionalityValues | null;
   surprise: number;
   latestReaction: number | null;
+  sector?: string | null;
   isLoading?: boolean;
   xDomain?: [number, number];
 };
@@ -49,6 +50,7 @@ export default function CombinedProportionalityReactionChart({
   proportionality,
   surprise,
   latestReaction,
+  sector = null,
   isLoading = false,
   xDomain,
 }: Props) {
@@ -180,29 +182,53 @@ export default function CombinedProportionalityReactionChart({
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span className="inline-flex items-center gap-2">
-            <span className="h-0.5 w-5 bg-red-600" /> Regression line
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-black" /> Model data points
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-[#065f46]" /> Expected point
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-blue-600" /> Actual point
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="inline-flex items-center justify-center">
-              <svg className="w-3 h-3 text-gray-500" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-700">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-xs text-zinc-500">Model</div>
+            <div className="mt-1 font-mono text-sm text-zinc-900">
+              CAR = {model.alpha.toFixed(4)} + {model.beta.toFixed(4)} × z
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">(z is surprise z-score; CAR reported as decimal)</div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <div className="text-right">
+              <div className="text-xs text-zinc-500">Expected</div>
+              <div className="font-mono text-sm text-emerald-700">{formatPercent(model.alpha + model.beta * ((surprise - model.surprise_mean) / (model.surprise_sd + 1e-9)))}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-zinc-500">Actual</div>
+              <div className="font-mono text-sm text-sky-700">{formatPercent(latestReaction ?? proportionality?.actual_CAR ?? 0)}</div>
+            </div>
+            {sector ? (
+              <div className="ml-2 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-800">{sector}</div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-zinc-700">
+            <span className="inline-flex items-center gap-2">
+              <span className="inline-block h-1 w-5 rounded bg-red-600" aria-hidden /> Regression line
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="inline-block h-3 w-3 rounded-full bg-black" aria-hidden /> Sector data points
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="inline-block h-3 w-3 rounded-full bg-[#065f46]" aria-hidden /> Expected point
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="inline-block h-3 w-3 rounded-full bg-blue-600" aria-hidden /> Actual point
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <svg className="w-3 h-3 text-gray-500" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                 <path d="M1 4 L7 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                 <path d="M4 1 L4 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
+              Rejected Outliers
             </span>
-            Rejected Outliers
-          </span>
+          </div>
         </div>
       </div>
     </div>

@@ -1,0 +1,210 @@
+"use client";
+
+import { useState } from "react";
+
+import {
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Scatter,
+  ReferenceDot,
+  ReferenceLine,
+  Tooltip,
+  XAxis,
+  YAxis,
+  Label,
+} from "recharts";
+
+import type {
+  GeneratedProportionalityPlotResponse,
+  RegressionModelValues,
+  ProportionalityValues,
+} from "@/lib/api";
+
+type Props = {
+  generated: GeneratedProportionalityPlotResponse;
+  model: RegressionModelValues;
+  proportionality: ProportionalityValues | null;
+  surprise: number;
+  latestReaction: number | null;
+  isLoading?: boolean;
+  xDomain?: [number, number];
+};
+
+function formatPercent(value: number) {
+  const pct = value * 100;
+  if (Math.abs(pct) >= 100) return `${pct.toFixed(0)}%`;
+  if (Math.abs(pct) >= 1) return `${pct.toFixed(1)}%`;
+  return `${pct.toFixed(2)}%`;
+}
+
+function surpriseToZ(model: RegressionModelValues, surprise: number) {
+  return (surprise - model.surprise_mean) / (model.surprise_sd + 1e-9);
+}
+
+export default function CombinedProportionalityReactionChart({
+  generated,
+  model,
+  proportionality,
+  surprise,
+  latestReaction,
+  isLoading = false,
+  xDomain,
+}: Props) {
+  const [active, setActive] = useState<"expected" | "actual" | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-80 w-full items-center justify-center rounded-2xl border border-teal-200 bg-white p-3 shadow-sm">
+        <div className="w-full space-y-3">
+          <div className="h-5 w-40 animate-pulse rounded bg-surface" />
+          <div className="h-64 animate-pulse rounded-2xl bg-surface" />
+          <p className="text-center text-sm text-zinc-600">Loading graph...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const z = surpriseToZ(model, surprise);
+  const actual = latestReaction ?? proportionality?.actual_CAR ?? 0;
+  const expected = model.alpha + model.beta * z;
+
+  const domainMin = xDomain ? xDomain[0] : Math.min(z - 0.5, 0);
+  const domainMax = xDomain ? xDomain[1] : Math.max(z + 0.5, 0);
+
+  const linePoints = generated.line_points ?? [];
+  if (!linePoints.map(p => p.expected_reaction).find(r => r === expected)) {
+    linePoints.push({ z_score: z, expected_reaction: expected });
+  }
+
+  const yVals = [
+    ...linePoints.map((p) => p.expected_reaction),
+    actual,
+    expected,
+  ];
+  const minY = Math.min(...yVals);
+  const maxY = Math.max(...yVals);
+  const spread = Math.max(maxY - minY, 1e-3);
+  const padding = spread * 0.25;
+
+  return (
+    <div className="rounded-2xl border border-teal-200 bg-white p-3 shadow-sm">
+      <div className="h-80 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart
+            margin={{ top: 18, right: 28, bottom: 36, left: 34 }}
+            data={linePoints}
+          >
+            <CartesianGrid strokeDasharray="4 4" stroke="#d8e6df" />
+            <XAxis
+              dataKey="z_score"
+              type="number"
+              domain={[domainMin, domainMax]}
+              tickFormatter={(v: number) => v.toFixed(2)}
+              stroke="#1f2937"
+              tickMargin={10}
+              height={50}
+            >
+              <Label value="Surprise z-score" position="bottom" />
+            </XAxis>
+            <YAxis
+              type="number"
+              domain={[minY - padding, maxY + padding]}
+              tickFormatter={(v: number) => formatPercent(v)}
+              stroke="#1f2937"
+              tickMargin={10}
+              width={90}
+            >
+              <Label value="Reaction / CAR" angle={-90} position="left" />
+            </YAxis>
+
+            <Tooltip
+              formatter={(v: number) => formatPercent(v)}
+              labelFormatter={(v: number) => `z-score ${Number(v).toFixed(3)}`}
+            />
+
+            {/* regression line */}
+            <Line
+              dataKey="expected_reaction"
+              name="Regression line"
+              type="monotone"
+              stroke="#dc2626"
+              strokeWidth={3}
+              dot={false}
+            />
+
+            {/* model points and outliers */}
+            <Scatter data={generated.points} dataKey="reaction" name="Model data points" fill="#111827" />
+            {generated.outliers && generated.outliers.length > 0 ? (
+              <Scatter data={generated.outliers} dataKey="reaction" name="Excluded outliers" fill="#9ca3af" shape="cross" />
+            ) : null}
+
+            {/* guide between expected and actual for this test point */}
+            <ReferenceLine
+              segment={[{ x: z, y: expected }, { x: z, y: actual }]}
+              stroke="#6b7280"
+              strokeDasharray="4 4"
+            />
+
+            <ReferenceDot
+              x={z}
+              y={expected}
+              r={7}
+              fill="#065f46"
+              stroke="#ffffff"
+              strokeWidth={2}
+              isFront
+              ifOverflow="extendDomain"
+              onMouseEnter={() => setActive("expected")}
+              onClick={() => setActive("expected")}
+              label={{ value: `Expected ${formatPercent(expected)}`, position: "top", fill: "#065f46", fontSize: 12 }}
+              style={{ cursor: "pointer" }}
+            />
+
+            <ReferenceDot
+              x={z}
+              y={actual}
+              r={7}
+              fill="#2563eb"
+              stroke="#ffffff"
+              strokeWidth={2}
+              isFront
+              ifOverflow="extendDomain"
+              onMouseEnter={() => setActive("actual")}
+              onClick={() => setActive("actual")}
+              label={{ value: `Actual ${formatPercent(actual)}`, position: "top", fill: "#2563eb", fontSize: 12 }}
+              style={{ cursor: "pointer" }}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="inline-flex items-center gap-2">
+            <span className="h-0.5 w-5 bg-red-600" /> Regression line
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full bg-black" /> Model data points
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full bg-[#065f46]" /> Expected point
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full bg-blue-600" /> Actual point
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="inline-flex items-center justify-center">
+              <svg className="w-3 h-3 text-gray-500" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 4 L7 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M4 1 L4 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+            Rejected Outliers
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}

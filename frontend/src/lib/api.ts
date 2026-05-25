@@ -51,11 +51,17 @@ export type ReactionEndpointResponse = {
     {
       reaction: Record<string, number> | string;
       surprise: number;
+      market?: Record<string, number>;
     }
   >;
 };
 
 export type ProportionalityEndpointResponse = Record<string, ProportionalityResponseEntry>;
+
+export type SurpriseEndpointResponse = {
+  ticker: string;
+  surprise: Record<string, number>;
+};
 
 export type GeneratedProportionalityPoint = {
   z_score: number;
@@ -132,6 +138,23 @@ export async function getTickerReaction(
   return request<ReactionEndpointResponse>(
     `/${encodeURIComponent(symbol)}/reaction?${query.toString()}`,
   );
+}
+
+export async function getTickerSurprise(
+  symbol: string,
+  filingDate?: string,
+): Promise<SurpriseEndpointResponse> {
+  const query = new URLSearchParams();
+  if (filingDate) {
+    query.set("filing_date", filingDate);
+  }
+
+  const qs = query.toString();
+  const path = qs
+    ? `/${encodeURIComponent(symbol)}/surprise?${qs}`
+    : `/${encodeURIComponent(symbol)}/surprise`;
+
+  return request<SurpriseEndpointResponse>(path);
 }
 
 export async function getTickerProportionality(

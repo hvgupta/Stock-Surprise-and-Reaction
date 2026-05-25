@@ -46,8 +46,34 @@ export default function Home() {
     void run();
   }, []);
 
+  const latestItems = useMemo(() => {
+    const byTicker = new Map<string, SP500TickerSnapshot>();
+    for (const item of items) {
+      const current = byTicker.get(item.ticker);
+      if (!current) {
+        byTicker.set(item.ticker, item);
+        continue;
+      }
+
+      const currentTs = Date.parse(current.filing_date);
+      const nextTs = Date.parse(item.filing_date);
+      if (Number.isNaN(currentTs) || Number.isNaN(nextTs)) {
+        if (item.filing_date > current.filing_date) {
+          byTicker.set(item.ticker, item);
+        }
+        continue;
+      }
+
+      if (nextTs > currentTs) {
+        byTicker.set(item.ticker, item);
+      }
+    }
+
+    return Array.from(byTicker.values());
+  }, [items]);
+
   const selectedItems = useMemo(() => {
-    return items.filter((item) => {
+    return latestItems.filter((item) => {
       if (selectedSector && item.sector !== selectedSector) {
         return false;
       }
@@ -63,7 +89,7 @@ export default function Home() {
 
       return true;
     });
-  }, [items, selectedBucket, selectedSector]);
+  }, [latestItems, selectedBucket, selectedSector]);
 
   const topTen = useMemo(() => {
     return [...selectedItems]
@@ -81,20 +107,20 @@ export default function Home() {
   );
 
   const summaryStats = useMemo(() => {
-    const beats = items.filter((x) => x.surprise > 0);
-    const misses = items.filter((x) => x.surprise < 0);
+    const beats = latestItems.filter((x) => x.surprise > 0);
+    const misses = latestItems.filter((x) => x.surprise < 0);
     const avgBeat = beats.length
       ? beats.reduce((s, x) => s + x.surprise, 0) / beats.length
       : 0;
     const avgMiss = misses.length
       ? misses.reduce((s, x) => s + x.surprise, 0) / misses.length
       : 0;
-    return { total: items.length, beatCount: beats.length, missCount: misses.length, avgBeat, avgMiss };
-  }, [items]);
+    return { total: latestItems.length, beatCount: beats.length, missCount: misses.length, avgBeat, avgMiss };
+  }, [latestItems]);
 
   const sectorData = useMemo(() => {
     const map = new Map<string, { sum: number; count: number }>();
-    for (const item of items) {
+    for (const item of latestItems) {
       const entry = map.get(item.sector) ?? { sum: 0, count: 0 };
       entry.sum += item.surprise;
       entry.count += 1;
@@ -103,21 +129,55 @@ export default function Home() {
     return Array.from(map.entries())
       .map(([sector, { sum, count }]) => ({ sector, avgSurprise: sum / count, count }))
       .sort((a, b) => b.avgSurprise - a.avgSurprise);
-  }, [items]);
+  }, [latestItems]);
+
+  const sectorOutliers = useMemo(() => {
+    const map = new Map<string, Array<{ ticker: string; company_name: string; surprisePct: number; filing_date: string }>>();
+    const bySector = new Map<string, number[]>();
+    for (const it of latestItems) {
+      const pct = it.surprise * 100;
+      const arr = bySector.get(it.sector) ?? [];
+      arr.push(pct);
+      bySector.set(it.sector, arr);
+    }
+
+    for (const sector of Array.from(bySector.keys())) {
+      const values = bySector.get(sector) ?? [];
+      if (values.length < 4) {
+        map.set(sector, []);
+        continue;
+      }
+      const sorted = [...values].sort((a, b) => a - b);
+      const q1 = sorted[Math.floor((sorted.length - 1) * 0.25)];
+      const q3 = sorted[Math.floor((sorted.length - 1) * 0.75)];
+      const iqr = q3 - q1;
+      const lower = q1 - 1.5 * iqr;
+      const upper = q3 + 1.5 * iqr;
+
+      const outliers = latestItems
+        .filter((it) => it.sector === sector)
+        .map((it) => ({ ticker: it.ticker, company_name: it.company_name, surprisePct: it.surprise * 100, filing_date: it.filing_date }))
+        .filter((it) => it.surprisePct < lower || it.surprisePct > upper)
+        .sort((a, b) => Math.abs(b.surprisePct) - Math.abs(a.surprisePct));
+
+      map.set(sector, outliers.slice(0, 6));
+    }
+    return map;
+  }, [latestItems]);
 
   const histogramData = useMemo((): HistogramBucket[] => {
     return HISTOGRAM_BUCKETS.map((bucket) => ({
       label: bucket.label,
       isPositive: bucket.isPositive,
-      count: items.filter((item) => {
+      count: latestItems.filter((item) => {
         const pct = item.surprise * 100;
         return pct > bucket.min && pct <= bucket.max;
       }).length,
     }));
-  }, [items]);
+  }, [latestItems]);
 
   const scatterData = useMemo(() => {
-    return items
+    return latestItems
       .filter((x) => x.latest_reaction != null)
       .map((x) => ({
         ticker: x.ticker,
@@ -126,7 +186,7 @@ export default function Home() {
         reaction: (x.latest_reaction as number) * 100,
         sector: x.sector,
       }));
-  }, [items]);
+  }, [latestItems]);
 
   const trimmedQuery = searchQuery.trim();
   const visibleItems =
@@ -155,7 +215,7 @@ export default function Home() {
           </section>
         ) : null}
 
-        {!isLoading && !errorMessage && items.length > 0 ? (
+        {!isLoading && !errorMessage && latestItems.length > 0 ? (
           <section className="mb-8 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-foreground">Season Analytics</h2>
@@ -293,6 +353,51 @@ export default function Home() {
             No matches found.
           </section>
         ) : null}
+        <div className="mt-4 rounded-2xl border border-emerald-200 p-4">
+          <h3 className="mb-1 text-sm font-semibold uppercase tracking-[0.14em] text-zinc-600">Sector Outliers</h3>
+          <p className="mb-3 text-xs text-zinc-400">Outlier filings per sector (IQR method). Click a ticker to open details.</p>
+          {Array.from(sectorOutliers.entries()).map(([sector, outliers]) => (
+            <details key={sector} className="mb-4" open>
+              <summary className="flex w-full cursor-pointer items-center justify-between rounded-md px-3 py-2 bg-zinc-50">
+                <div className="flex items-center gap-3">
+                  <div className="text-sm font-semibold text-foreground">{sector}</div>
+                </div>
+              </summary>
+
+              {outliers.length === 0 ? (
+                <div className="mt-2 mb-2 text-xs text-zinc-500 px-3">No outliers</div>
+              ) : (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {outliers.map((it) => {
+                    const matched = latestItems.find((x) => x.ticker === it.ticker && x.filing_date === it.filing_date);
+                    return matched ? (
+                      <SurpriseCard key={it.ticker + it.filing_date} item={matched} />
+                    ) : (
+                      <div key={it.ticker + it.filing_date} className="flex items-center justify-between rounded-md bg-surface px-3 py-2">
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{it.ticker}</div>
+                          <div className="text-xs text-zinc-500">{it.company_name}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-mono text-sm">{it.surprisePct >= 0 ? "+" : ""}{it.surprisePct.toFixed(2)}%</div>
+                          <div className="text-xs text-zinc-500">{it.filing_date}</div>
+                          <div className="mt-1">
+                            <a
+                              href={`/ticker/${it.ticker}?filing_date=${encodeURIComponent(it.filing_date)}&company_name=${encodeURIComponent(it.company_name)}&sector=${encodeURIComponent(sector)}&surprise=${encodeURIComponent(it.surprisePct)}`}
+                              className="text-xs font-semibold text-brand hover:underline"
+                            >
+                              Open
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </details>
+          ))}
+        </div>
       </main>
     </div>
   );

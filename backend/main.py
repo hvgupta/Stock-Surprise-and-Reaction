@@ -1,4 +1,4 @@
-from backend.adapters import SP500_COMPANIES, get_earnings_history_of_ticker
+from backend.adapters import SP500_COMPANIES, get_earnings_history_of_ticker, get_1d_return_of_ticker
 from backend.logger import get_configured_logger
 from backend.model import (
     FilingReactionData,
@@ -422,9 +422,31 @@ async def fetch_reaction_for_ticker(
 
             logger.info(f"the reaction is {reaction}")
 
+            # Build market cumulative returns series aligned to the reaction dates
+            market_map: Dict[str, float] = {}
+            try:
+                sorted_dates = sorted(reaction[filing_date].keys())
+                cumulative_market = 0.0
+                for d in sorted_dates:
+                    # one-day return for the market index on this date
+                    from datetime import datetime
+
+                    dt = datetime.strptime(d, "%Y-%m-%d")
+                    m_ret = get_1d_return_of_ticker(market_index, dt)
+                    if m_ret is None:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"could not fetch 1-day return for market index {market_index} on {dt}, cannot calculate market cumulative returns",
+                        )
+                    cumulative_market += m_ret
+                    market_map[d] = cumulative_market
+            except Exception:
+                market_map = {}
+
             date_to_reaction_data[filing_date] = {
                 "reaction": reaction[filing_date],
                 "surprise": surprise["surprise"][filing_date],
+                "market": market_map,
             }
 
         except HTTPException as e:

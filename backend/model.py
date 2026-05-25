@@ -40,6 +40,7 @@ class SurpriseEndpointResponse(TypedDict):
 class FilingReactionData(TypedDict):
     reaction: Union[Dict[str, float], str]
     surprise: float
+    market: NotRequired[Union[Dict[str, float], str]]
 
 
 class ReactionEndpointResponse(TypedDict):

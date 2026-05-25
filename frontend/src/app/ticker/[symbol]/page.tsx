@@ -1,18 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import GeneratedProportionalityChart from "@/components/generated-proportionality-chart";
 import LoadingSpinner from "@/components/loading-spinner";
-import ProportionalityComparisonChart from "@/components/proportionality-comparison-chart";
 import ReactionTimelineChart from "@/components/reaction-timeline-chart";
 import RegressionChart from "@/components/regression-chart";
+import CombinedProportionalityReactionChart from "@/components/combined-proportionality-reaction-chart";
 import {
   getGeneratedProportionalityPlotData,
   getTickerProportionality,
   getTickerReaction,
+  getTickerSurprise,
   type GeneratedProportionalityPlotResponse,
   type ProportionalityEndpointResponse,
   type RegressionModelValues,
@@ -43,10 +43,12 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   const [proportionalityLoading, setProportionalityLoading] = useState(true);
   const [generatedPlotLoading, setGeneratedPlotLoading] = useState(true);
   const [generatedPlotData, setGeneratedPlotData] = useState<GeneratedProportionalityPlotResponse | null>(null);
-  const [generatedPlotError, setGeneratedPlotError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [zRange, setZRange] = useState<number>(2);
+  const [surpriseByFilingDate, setSurpriseByFilingDate] = useState<Record<string, number>>({});
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   function computeXDomain(model: RegressionModelValues | null, surpriseVal: number | null, halfRange: number) {
     if (!model || surpriseVal === null) return undefined;
@@ -56,70 +58,130 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   }
 
   useEffect(() => {
-    const run = async () => {
+    const initializeTicker = async () => {
       const resolvedParams = await params;
-      setSymbol(resolvedParams.symbol.toUpperCase());
+      const normalizedSymbol = resolvedParams.symbol.toUpperCase();
+      setSymbol(normalizedSymbol);
 
-      setCompanyName(searchParams.get("company_name") ?? resolvedParams.symbol.toUpperCase());
-      setSector(searchParams.get("sector") ?? "");
-      setFilingDate(searchParams.get("filing_date") ?? "");
+      try {
+        const surprisePayload = await getTickerSurprise(normalizedSymbol);
+        const surpriseMap = surprisePayload.surprise ?? {};
+        setSurpriseByFilingDate(surpriseMap);
 
-      const surpriseParam = searchParams.get("surprise");
-      setSurprise(surpriseParam === null ? null : Number(surpriseParam));
+        const filings = Object.keys(surpriseMap).sort(
+          (a, b) => Date.parse(b) - Date.parse(a),
+        );
 
-      const currentFilingDate = searchParams.get("filing_date") ?? "";
-      if (!currentFilingDate) {
-        setErrorMessage("Missing filing date for this ticker.");
-        setReactionLoading(false);
-        setProportionalityLoading(false);
-        setGeneratedPlotLoading(false);
-        return;
-      }
+        const requestedFiling = searchParams.get("filing_date");
+        const selectedFiling = filings.includes(requestedFiling ?? "")
+          ? (requestedFiling as string)
+          : (filings[0] ?? "");
 
-      void (async () => {
-        try {
-          const payload = await getTickerReaction(resolvedParams.symbol, currentFilingDate);
-          setReactionData(payload);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to load reaction";
-          setErrorMessage(message);
-        } finally {
-          setReactionLoading(false);
+        setCompanyName(searchParams.get("company_name") ?? normalizedSymbol);
+        setSector(searchParams.get("sector") ?? "");
+        setFilingDate(selectedFiling);
+
+        const surpriseParam = searchParams.get("surprise");
+        if (surpriseParam !== null && surpriseParam !== "") {
+          setSurprise(Number(surpriseParam));
+        } else {
+          const selectedSurprise = selectedFiling ? surpriseMap[selectedFiling] : undefined;
+          setSurprise(typeof selectedSurprise === "number" ? selectedSurprise : null);
         }
-      })();
 
-      void (async () => {
-        try {
-          const payload = await getTickerProportionality(resolvedParams.symbol, currentFilingDate);
-          setProportionalityData(payload);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to load proportionality";
-          setErrorMessage(message);
-        } finally {
-          setProportionalityLoading(false);
+        if (!selectedFiling) {
+          setErrorMessage("No filing date available for this ticker.");
+        } else {
+          setErrorMessage(null);
         }
-      })();
-
-      const currentSector = searchParams.get("sector") ?? "";
-      if (!currentSector) {
-        setGeneratedPlotLoading(false);
-      } else {
-        void (async () => {
-          try {
-            const payload = await getGeneratedProportionalityPlotData(currentSector, currentFilingDate);
-            setGeneratedPlotData(payload);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Failed to load generated plot";
-            setGeneratedPlotError(message);
-          } finally {
-            setGeneratedPlotLoading(false);
-          }
-        })();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load filing dates";
+        setErrorMessage(message);
       }
     };
 
-    void run();
+    void initializeTicker();
   }, [params, searchParams]);
+
+  useEffect(() => {
+    if (!symbol || !filingDate) {
+      setReactionLoading(false);
+      setProportionalityLoading(false);
+      setGeneratedPlotLoading(false);
+      return;
+    }
+
+    setReactionLoading(true);
+    setProportionalityLoading(true);
+    setGeneratedPlotLoading(true);
+
+    void (async () => {
+      try {
+        const payload = await getTickerReaction(symbol, filingDate);
+        setReactionData(payload);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load reaction";
+        setErrorMessage(message);
+      } finally {
+        setReactionLoading(false);
+      }
+    })();
+
+    void (async () => {
+      try {
+        const payload = await getTickerProportionality(symbol, filingDate);
+        setProportionalityData(payload);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load proportionality";
+        setErrorMessage(message);
+      } finally {
+        setProportionalityLoading(false);
+      }
+    })();
+
+    if (!sector) {
+      setGeneratedPlotData(null);
+      setGeneratedPlotLoading(false);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const payload = await getGeneratedProportionalityPlotData(sector, filingDate);
+        setGeneratedPlotData(payload);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load generated plot";
+        setGeneratedPlotData(null);
+      } finally {
+        setGeneratedPlotLoading(false);
+      }
+    })();
+  }, [symbol, filingDate, sector]);
+
+  const filingOptions = useMemo(
+    () => {
+      const allDates = Object.keys(surpriseByFilingDate).sort((a, b) => Date.parse(b) - Date.parse(a));
+      // Exclude the earliest (oldest) filing date because it doesn't have sufficient data for models
+      if (allDates.length > 1) {
+        return allDates.slice(0, allDates.length - 1);
+      }
+      return allDates;
+    },
+    [surpriseByFilingDate],
+  );
+
+  const handleFilingDateChange = (nextFilingDate: string) => {
+    setFilingDate(nextFilingDate);
+    const nextSurprise = surpriseByFilingDate[nextFilingDate];
+    setSurprise(typeof nextSurprise === "number" ? nextSurprise : null);
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("filing_date", nextFilingDate);
+    if (typeof nextSurprise === "number") {
+      nextParams.set("surprise", String(nextSurprise));
+    }
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  };
   const reactionRows = useMemo(() => {
     if (!reactionData) {
       return [] as Array<[string, number]>;
@@ -134,12 +196,20 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   }, [reactionData]);
 
     const timelineData = useMemo(() => {
-        return reactionRows.map(([date, car], i) => ({
-        label: `Day ${i + 1}`,
-        date,
-        car: car * 100,
-        }));
-    }, [reactionRows]);
+        return reactionRows.map(([date, car], i) => {
+          const marketVal = (reactionData && Object.values(reactionData.reaction_data)[0] && (Object.values(reactionData.reaction_data)[0] as any).market)
+            ? (((Object.values(reactionData.reaction_data)[0] as any).market[date] ?? 0) * 100)
+            : undefined;
+          const total = typeof marketVal === "number" ? marketVal + car * 100 : undefined;
+          return {
+            label: `Day ${i + 1}`,
+            date,
+            car: car * 100,
+            market: marketVal,
+            total,
+          };
+        });
+    }, [reactionRows, reactionData]);
 
   const latestReaction = useMemo(() => {
     if (reactionRows.length === 0) {
@@ -159,9 +229,14 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   }, [proportionalityData]);
 
   const regressionModel: RegressionModelValues | null = proportionalityEntry?.regression_model ?? null;
-  const actualCAR = proportionalityEntry?.actual_CAR ?? null;
-  const expectedCAR = proportionalityEntry?.expected_CAR ?? null;
-  const pctDiffFromExpected = proportionalityEntry?.pct_diff_from_expected ?? null;
+
+  const proportionFlag = useMemo(() => {
+    const pct = proportionalityEntry?.pct_diff_from_expected;
+    if (typeof pct !== "number") return { label: "Unknown", style: "bg-zinc-50 text-zinc-700" };
+    if (pct > 0.2) return { label: "Above proportionate", style: "bg-blue-50 text-blue-700" };
+    if (pct < -0.2) return { label: "Below proportionate", style: "bg-red-50 text-red-700" };
+    return { label: "Approximately proportionate", style: "bg-zinc-50 text-zinc-700" };
+  }, [proportionalityEntry]);
 
   return (
     <div className="pb-10 pt-8">
@@ -193,12 +268,35 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
                   <p className="text-xs uppercase tracking-[0.14em] text-zinc-600">
                     {sector} · Filing {filingDate}
                   </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <label htmlFor="filing-date" className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                      Filing Date
+                    </label>
+                    <select
+                      id="filing-date"
+                      value={filingDate}
+                      onChange={(event) => handleFilingDateChange(event.target.value)}
+                      className="rounded-md border border-emerald-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                      disabled={filingOptions.length === 0}
+                    >
+                      {filingOptions.map((date) => (
+                        <option key={date} value={date}>
+                          {date}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="text-right">
                   <p className="text-xs uppercase tracking-[0.12em] text-zinc-600">Surprise</p>
                   <p className="font-mono text-2xl font-bold text-brand">
                     {formatSignedPercent(surprise)}
                   </p>
+                  <div className="mt-2 flex items-center justify-end">
+                    <div className={`rounded-full px-3 py-1 text-xs font-semibold ${proportionFlag.style}`}>
+                      {proportionFlag.label}
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -228,7 +326,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
               </article>
             </section>
 
-            {actualCAR !== null && expectedCAR !== null && pctDiffFromExpected !== null ? (
+            {/* {actualCAR !== null && expectedCAR !== null && pctDiffFromExpected !== null ? (
               <section className="mt-5">
                 <ProportionalityComparisonChart
                   actualCAR={actualCAR}
@@ -236,7 +334,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
                   pctDiffFromExpected={pctDiffFromExpected}
                 />
               </section>
-            ) : null}
+            ) : null} */}
 
             <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
               <h2 className="text-lg font-bold">Reaction and Proportionality Model</h2>
@@ -268,14 +366,26 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
                       ))}
                     </div>
                   </div>
-                  <RegressionChart
-                    model={regressionModel}
-                    proportionality={proportionalityEntry ?? null}
-                    surprise={surprise ?? 0}
-                    latestReaction={latestReaction}
-                    isLoading={reactionLoading || proportionalityLoading}
-                    xDomain={computeXDomain(regressionModel, surprise, zRange)}
-                  />
+                  {generatedPlotData ? (
+                    <CombinedProportionalityReactionChart
+                      generated={generatedPlotData}
+                      model={regressionModel}
+                      proportionality={proportionalityEntry ?? null}
+                      surprise={surprise ?? 0}
+                      latestReaction={latestReaction}
+                      isLoading={reactionLoading || proportionalityLoading || generatedPlotLoading}
+                      xDomain={computeXDomain(regressionModel, surprise, zRange)}
+                    />
+                  ) : (
+                    <RegressionChart
+                      model={regressionModel}
+                      proportionality={proportionalityEntry ?? null}
+                      surprise={surprise ?? 0}
+                      latestReaction={latestReaction}
+                      isLoading={reactionLoading || proportionalityLoading}
+                      xDomain={computeXDomain(regressionModel, surprise, zRange)}
+                    />
+                  )}
                 </div>
               ) : proportionalityLoading ? (
                 <div className="mt-3 h-72 animate-pulse rounded-2xl bg-surface" />
@@ -295,50 +405,8 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
                 <ReactionTimelineChart data={timelineData} isLoading={reactionLoading} />
               </div>
             </section>
-            <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
-              <h2 className="text-lg font-bold">Reaction Timeline</h2>
-              {reactionLoading ? (
-                <div className="mt-3 h-20 animate-pulse rounded-2xl bg-surface" />
-              ) : reactionRows.length > 0 ? (
-                <div className="mt-3 overflow-auto">
-                  <table className="min-w-[320px] text-sm">
-                    <thead>
-                      <tr className="border-b border-zinc-200 text-left">
-                        <th className="px-2 py-2">Date</th>
-                        <th className="px-2 py-2">Reaction</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reactionRows.map(([date, value]) => (
-                        <tr key={date} className="border-b border-zinc-100">
-                          <td className="px-2 py-2 font-mono">{date}</td>
-                          <td className="px-2 py-2 font-mono">{formatSignedPercent(value)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-              {!reactionLoading && reactionRows.length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-700">No reaction timeline data available.</p>
-              ) : null}
-            </section>
 
-            <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
-              <h2 className="text-lg font-bold">Generated Proportionality Plot (Interactive)</h2>
-              {generatedPlotLoading ? <LoadingSpinner label="Loading generated plot..." className="mt-3 min-h-72" /> : null}
-              {!generatedPlotLoading && generatedPlotError ? (
-                <p className="mt-3 text-sm text-zinc-700">{generatedPlotError}</p>
-              ) : null}
-              {!generatedPlotLoading && !generatedPlotError && generatedPlotData ? (
-                <div className="mt-3">
-                  <GeneratedProportionalityChart data={generatedPlotData} />
-                </div>
-              ) : null}
-              {!generatedPlotLoading && !generatedPlotError && !generatedPlotData ? (
-                <p className="mt-3 text-sm text-zinc-700">No generated proportionality plot data available.</p>
-              ) : null}
-            </section>
+            {/* Generated proportionality plot removed — combined view used above when available */}
           </>
         ) : null}
       </main>

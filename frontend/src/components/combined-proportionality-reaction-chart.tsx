@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
 import {
   CartesianGrid,
   ComposedChart,
@@ -21,6 +19,7 @@ import type {
   RegressionModelValues,
   ProportionalityValues,
 } from "@/lib/api";
+import type { ContentType } from "recharts/types/component/Label";
 
 type Props = {
   generated: GeneratedProportionalityPlotResponse;
@@ -44,6 +43,55 @@ function surpriseToZ(model: RegressionModelValues, surprise: number) {
   return (surprise - model.surprise_mean) / (model.surprise_sd + 1e-9);
 }
 
+const renderDotLabel: Exclude<ContentType, React.ReactElement> = (props) => {
+  const { x, y, value, fill = "#111827", fontSize = 12, viewBox, position } = props ?? {};
+  const resolvedX = typeof x === "number" ? x : Number(x ?? 0);
+  const resolvedY = typeof y === "number" ? y : Number(y ?? 0);
+  const resolvedFontSize = typeof fontSize === "number" ? fontSize : Number(fontSize);
+  const cartesianViewBox = viewBox as { x?: number; y?: number } | undefined;
+
+  if (!Number.isFinite(resolvedFontSize) || value === undefined) {
+    return null;
+  }
+
+  const resolvedViewBoxX = typeof cartesianViewBox?.x === "number" ? cartesianViewBox.x : NaN;
+  const resolvedViewBoxY = typeof cartesianViewBox?.y === "number" ? cartesianViewBox.y : NaN;
+
+  const text = String(value);
+  const paddingX = 6;
+  const paddingY = 3;
+  const estimatedWidth = Math.max(text.length * 7, 54);
+  const width = estimatedWidth + paddingX * 2;
+  const height = resolvedFontSize + paddingY * 2 + 2;
+  const centerX = Number.isFinite(resolvedViewBoxX) ? resolvedViewBoxX : resolvedX;
+  const centerY = Number.isFinite(resolvedViewBoxY) ? resolvedViewBoxY : resolvedY;
+  const positionName = typeof position === "string" ? position : "top";
+  const dotGap = 12;
+  const labelCenterY = positionName === "bottom"
+    ? centerY + dotGap + height / 2
+    : centerY - dotGap - height / 2;
+
+  if (!Number.isFinite(centerX) || !Number.isFinite(centerY)) {
+    return null;
+  }
+
+  return (
+    <g transform={`translate(${centerX - width / 2}, ${labelCenterY - height / 2})`}>
+      <rect width={width} height={height} rx={8} ry={8} fill="#ffffff" stroke="#e5e7eb" strokeWidth={1} />
+      <text
+        x={width / 2}
+        y={height / 2 + resolvedFontSize / 3 - 1}
+        textAnchor="middle"
+        fill={fill}
+        fontSize={resolvedFontSize}
+        fontWeight={600}
+      >
+        {text}
+      </text>
+    </g>
+  );
+};
+
 export default function CombinedProportionalityReactionChart({
   generated,
   model,
@@ -54,7 +102,6 @@ export default function CombinedProportionalityReactionChart({
   isLoading = false,
   xDomain,
 }: Props) {
-  const [active, setActive] = useState<"expected" | "actual" | null>(null);
 
   if (isLoading) {
     return (
@@ -89,6 +136,14 @@ export default function CombinedProportionalityReactionChart({
   const maxY = Math.max(...yVals);
   const spread = Math.max(maxY - minY, 1e-3);
   const padding = spread * 0.25;
+  const expectedIsLower = expected < actual;
+  const actualIsLower = actual < expected;
+  const expectedLabelPosition = expectedIsLower ? "bottom" : "top";
+  const actualLabelPosition = actualIsLower ? "bottom" : "top";
+  const expectedLabelDx = 0;
+  const actualLabelDx = 0;
+  const expectedLabelDy = expectedIsLower ? 16 : -12;
+  const actualLabelDy = actualIsLower ? 16 : -12;
 
   return (
     <div className="rounded-2xl border border-teal-200 bg-white p-3 shadow-sm">
@@ -158,9 +213,7 @@ export default function CombinedProportionalityReactionChart({
               strokeWidth={2}
               isFront
               ifOverflow="extendDomain"
-              onMouseEnter={() => setActive("expected")}
-              onClick={() => setActive("expected")}
-              label={{ value: `Expected ${formatPercent(expected)}`, position: "top", fill: "#065f46", fontSize: 12 }}
+              label={{ value: `Expected ${formatPercent(expected)}`, position: expectedLabelPosition, fill: "#065f46", fontSize: 12, dx: expectedLabelDx, dy: expectedLabelDy, content: renderDotLabel }}
               style={{ cursor: "pointer" }}
             />
 
@@ -173,9 +226,7 @@ export default function CombinedProportionalityReactionChart({
               strokeWidth={2}
               isFront
               ifOverflow="extendDomain"
-              onMouseEnter={() => setActive("actual")}
-              onClick={() => setActive("actual")}
-              label={{ value: `Actual ${formatPercent(actual)}`, position: "top", fill: "#2563eb", fontSize: 12 }}
+              label={{ value: `Actual ${formatPercent(actual)}`, position: actualLabelPosition, fill: "#2563eb", fontSize: 12, dx: actualLabelDx, dy: actualLabelDy, content: renderDotLabel }}
               style={{ cursor: "pointer" }}
             />
           </ComposedChart>

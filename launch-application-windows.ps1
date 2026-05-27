@@ -16,11 +16,11 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "Starting backend..."
-Set-Location $backendDir
 
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     Write-Host "Found 'uv' CLI - using it to run backend"
-    $backendCommand = { uv run fastapi run backend\app.py }
+    # Run from repo root so uv picks up pyproject.toml; path is relative to root
+    $backendCommand = { uv run fastapi run backend/app.py }
 } else {
     $venvDir = Join-Path $backendDir '.venv'
     $pythonExe = Join-Path $venvDir 'Scripts\python.exe'
@@ -34,7 +34,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
         $pythonExe = 'python'
     }
 
-    # If we created (or already have) a backend virtualenv, install project dependencies into it
+    # Install project dependencies into the virtualenv
     if (Test-Path $venvDir) {
         Write-Host "Installing project dependencies into backend virtualenv..."
         & $pythonExe -m pip install --upgrade pip
@@ -64,16 +64,23 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-Set-Location $frontendDir
+# Install frontend dependencies if node_modules is missing
+if (-not (Test-Path (Join-Path $frontendDir 'node_modules'))) {
+    Write-Host "Installing frontend dependencies (npm install)..."
+    Push-Location $frontendDir
+    & npm install
+    Pop-Location
+}
 
 Write-Host "Starting frontend..."
-$npmExe = (Get-Command npm.cmd).Source
-$frontendProc = Start-Process -FilePath $npmExe -ArgumentList @('run', 'dev') -WorkingDirectory $frontendDir -PassThru
+$frontendProc = Start-Process -FilePath 'cmd.exe' `
+    -ArgumentList '/c', 'npm', 'run', 'dev' `
+    -WorkingDirectory $frontendDir `
+    -NoNewWindow -PassThru
 Write-Host "Frontend started (pid: $($frontendProc.Id))"
 
 try {
     Write-Host "Starting backend in the foreground. Press Ctrl+C to stop."
-    # Ensure the backend is started from the repository root so the `backend` package is importable
     Set-Location $scriptDir
     & $backendCommand
 } finally {

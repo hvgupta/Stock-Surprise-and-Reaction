@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# run-dev.sh — start backend (uvicorn) and frontend (next) for local development
-# Usage: ./run-dev.sh
+# launch-application-linux.sh — start backend (uvicorn) and frontend (next) for local development
+# Usage: ./launch-application-linux.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -14,9 +14,6 @@ cd backend
 # Prefer 'uv' if available (per README). Otherwise create/activate a venv and run uvicorn.
 if command -v uv >/dev/null 2>&1; then
   echo "Found 'uv' CLI — using it to run backend"
-  uv run fastapi run app.py &
-  BACKEND_PID=$!
-  echo "Backend started via uv (pid: $BACKEND_PID)"
 else
   # create venv if missing
   if [ ! -d ".venv" ]; then
@@ -26,18 +23,12 @@ else
 
   # shellcheck disable=SC1091
   source .venv/bin/activate
-
-  # ensure uvicorn is installed in venv
-  if ! python -c "import uvicorn" >/dev/null 2>&1; then
-    echo "Installing uvicorn into virtualenv..."
-    python -m pip install --upgrade pip
-    python -m pip install 'uvicorn[standard]'
-  fi
-
-  python -m uvicorn backend.app:app --reload --port 8000 &
-  BACKEND_PID=$!
-  echo "Backend started (pid: $BACKEND_PID)"
+  pip install uv
 fi
+uv sync --active
+uv run fastapi run app.py &
+BACKEND_PID=$!
+echo "Backend started via uv (pid: $BACKEND_PID)"
 
 cd "$ROOT_DIR/frontend"
 
@@ -48,6 +39,7 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 echo "Starting frontend..."
+npm i
 npm run dev &
 FRONTEND_PID=$!
 echo "Frontend started (pid: $FRONTEND_PID)"

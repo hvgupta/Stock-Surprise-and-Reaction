@@ -386,22 +386,60 @@ def upsert_surprise_data(
 ) -> None:
     db.execute(
         """
-        INSERT INTO ticker_data (symbol, filing_date, surprise)
-        VALUES (?, ?, ?)
+        UPDATE ticker_data
+        SET surprise = ?
+        WHERE symbol = ? AND filing_date = ?
         """,
-        (ticker, date, surprise),
+        (surprise, ticker, date),
     )
+
+    rows = db.execute(
+        """
+        SELECT 1
+        FROM ticker_data
+        WHERE symbol = ? AND filing_date = ?
+        LIMIT 1
+        """,
+        (ticker, date),
+    )
+
+    if not rows:
+        db.execute(
+            """
+            INSERT INTO ticker_data (symbol, filing_date, reaction_date, surprise)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(symbol, reaction_date) DO UPDATE SET
+                filing_date = excluded.filing_date,
+                surprise = excluded.surprise
+            """,
+            (ticker, date, date, surprise),
+        )
     db.commit()
 
 
 def upsert_reaction_data(
     db: SQLiteDatabase, ticker: str, filing_date: str, reaction_date: str, reaction: float
 ) -> None:
+    surprise_rows = db.execute(
+        """
+        SELECT surprise
+        FROM ticker_data
+        WHERE symbol = ? AND filing_date = ? AND surprise IS NOT NULL
+        LIMIT 1
+        """,
+        (ticker, filing_date),
+    )
+    surprise = float(surprise_rows[0][0]) if surprise_rows else None
+
     db.execute(
         """
-        INSERT INTO ticker_data (symbol, filing_date, reaction_date, reaction)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO ticker_data (symbol, filing_date, reaction_date, surprise, reaction)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(symbol, reaction_date) DO UPDATE SET
+            filing_date = excluded.filing_date,
+            surprise = COALESCE(excluded.surprise, ticker_data.surprise),
+            reaction = excluded.reaction
         """,
-        (ticker, filing_date, reaction_date, reaction),
+        (ticker, filing_date, reaction_date, surprise, reaction),
     )
     db.commit()

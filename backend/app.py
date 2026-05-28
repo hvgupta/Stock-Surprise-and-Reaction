@@ -40,13 +40,3 @@ app.include_router(reader_router)
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
-
-
-
-@app.get("/generated_plots/proportionality/data")
-async def fetch_generated_proportionality_plot_data(
-    sector: str = Query(...),
-    filing_date: str = Query(...),
-):
-    sbac = cast(AsyncClient, app.state.database)
-    return await handlers.fetch_generated_proportionality_plot_data(sbac, sector, filing_date)

@@ -9,8 +9,6 @@ from backend.model import (
     ProportionalityResponseEntry,
     ReactionRequest,
     ReactionEndpointResponse,
-    SP500SurprisesResponse,
-    SP500TickerSnapshot,
     SurpriseEndpointResponse,
 )
 from backend.supabase import (
@@ -19,7 +17,8 @@ from backend.supabase import (
     get_ticker_reaction,
     get_ticker_propotionality_data,
     DateValues,
-    get_sp500_latest_surprises
+    get_sp500_latest_surprises,
+    get_model_data_points
 )
 
 from backend.helper_functions import (
@@ -27,6 +26,8 @@ from backend.helper_functions import (
     normalize_date_str,
     normalize_x,
 )
+
+from typing import cast
 
 logger = get_configured_logger(__name__)
 
@@ -267,53 +268,42 @@ async def _compute_proportionality_model_for_ticker(
 
     return model_dict
 
-
+@reader_router.get("/generated_plots/proportionality/data")
 async def fetch_generated_proportionality_plot_data(
+    sector: str = Query(...),
+    filing_date: str = Query(...),
+):
+    sbac = get_sbac(reader_router)
+    return await _fetch_generated_proportionality_plot_data(sbac, sector, filing_date)
+async def _fetch_generated_proportionality_plot_data(
     sbac: AsyncClient,
     sector: str,
     filing_date: str,
 ) -> GeneratedProportionalityPlotResponse:
-    normalized_filing_date = normalize_date_str(filing_date)
-    data_path = (
-        PLOT_OUTPUT_DIR / _sector_dir_name(sector) / f"{normalized_filing_date}.json"
-    )
-    if not data_path.exists():
-        sector_tickers: list[str] = (
-            SP500_COMPANIES[SP500_COMPANIES["GICS Sector"] == sector]["Symbol"]
-            .dropna()
-            .astype(str)
-            .tolist()
-        )
-
-        if len(sector_tickers) == 0:
-            raise HTTPException(
-                status_code=404,
-                detail=f"sector {sector} not found in S&P 500 list",
-            )
-
-        logger.info(
-            f"Generated plot data not found for sector {sector} on {normalized_filing_date}; computing on demand"
-        )
-        await _compute_proportionality_model_for_ticker(sbac, sector, sector_tickers)
-
-    if not data_path.exists():
+    data_points = await get_model_data_points(sbac, sector, filing_date)
+    if data_points is None:
         raise HTTPException(
             status_code=404,
-            detail=f"generated proportionality plot data not found for sector {sector} on {normalized_filing_date}",
+            detail=f"No proportionality model data found for sector {sector} on filing date {filing_date}",
         )
-
-    try:
-        payload = json.loads(data_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    proportionality_data = await get_ticker_propotionality_data(sbac, sector, filing_date)
+    if proportionality_data is None:
         raise HTTPException(
-            status_code=500,
-            detail=f"failed to read generated proportionality plot data: {exc}",
+            status_code=404,
+            detail=f"No proportionality model found for sector {sector} on filing date {filing_date}",
         )
-
-    if "outliers" not in payload:
-        payload["outliers"] = []
-
-    return payload
+    x_mean, x_sd, alpha, beta = proportionality_data[filing_date]
+    return {
+        "sector": sector,
+        "filing_date": filing_date,
+        "x_mean": x_mean,
+        "x_sd": x_sd,
+        "alpha": alpha,
+        "beta": beta,
+        "points": cast(List[GeneratedProportionalityPoint], data_points["points"]),
+        "outliers": cast(List[GeneratedProportionalityPoint], data_points["outliers"]),
+        "line_points": cast(List[GeneratedProportionalityLinePoint], data_points["line_points"]),
+    }
 
 def get_sbac(router: APIRouter):
     _state = getattr(reader_router, "state", None)

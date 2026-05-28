@@ -1,28 +1,27 @@
 from contextlib import asynccontextmanager
 
+import os
 import dotenv
 from typing import cast
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.logger import get_configured_logger
-from backend.sql_functions import SQLiteDatabase
+from backend.supabase import create_async_client, AsyncClient
 from backend.model import ReactionRequest, PropotionateRequest
 
 logger = get_configured_logger(__name__)
 
 dotenv.load_dotenv(override=True)
 
+ADMIN_MODE = os.getenv("SUPABASE_ADMIN_API_KEY") is not None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    with SQLiteDatabase("./markets.db") as database:
-        database.initialize()
-        app.state.database = database
-        logger.info("Starting up the application...")
-        yield
-        logger.info("Shutting down the application...")
-        app.state.database = None
+    sbac = create_async_client()
+    app.state.supabase_client = sbac
+    yield
+    
 
 
 app = FastAPI(lifespan=lifespan)
@@ -34,32 +33,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from . import main as handlers
+from backend.router import reader_router
+
+app.include_router(reader_router)
 
 @app.get("/health")
 async def health_check():
-    return await handlers.health_check()
+    return {"status": "ok"}
 
-
-@app.get("/sp500/surprises")
-async def fetch_sp500_surprises(limit: int | None = Query(default=None, ge=1)):
-    db = cast(SQLiteDatabase, app.state.database)
-    return await handlers.fetch_sp500_surprises(db, limit)
-
-@app.get("/{ticker}/surprise")
-async def fetch_surprise_for_ticker(ticker: str, filing_date: str | None = Query(default=None)):
-    db = cast(SQLiteDatabase, app.state.database)
-    return await handlers.fetch_surprise_for_ticker(db, ticker, filing_date)
-
-@app.get("/{ticker}/reaction")
-async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionRequest = Query(...)):
-    db = cast(SQLiteDatabase, app.state.database)
-    return await handlers.fetch_reaction_for_ticker(db, ticker, reaction_request)
-
-@app.get("/{ticker}/proportionate")
-async def fetch_proportionality_for_ticker(ticker: str, proportionate_request: PropotionateRequest = Query(...)):
-    db = cast(SQLiteDatabase, app.state.database)
-    return await handlers.fetch_proportionality_for_ticker(db, ticker, proportionate_request)
 
 
 @app.get("/generated_plots/proportionality/data")
@@ -67,5 +48,5 @@ async def fetch_generated_proportionality_plot_data(
     sector: str = Query(...),
     filing_date: str = Query(...),
 ):
-    db = cast(SQLiteDatabase, app.state.database)
-    return await handlers.fetch_generated_proportionality_plot_data(db, sector, filing_date)
+    sbac = cast(AsyncClient, app.state.database)
+    return await handlers.fetch_generated_proportionality_plot_data(sbac, sector, filing_date)

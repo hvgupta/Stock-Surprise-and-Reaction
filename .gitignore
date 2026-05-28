@@ -21,3 +21,5 @@ app.log
 **.venv
 
 backend/generated_plots/**
+
+**.json

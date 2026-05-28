@@ -1,4 +1,4 @@
-from backend.adapters import SP500_COMPANIES, get_earnings_history_of_ticker, get_1d_return_of_ticker
+from backend.adapters import SP500_COMPANIES, get_1d_return_of_ticker
 from backend.logger import get_configured_logger
 from backend.model import (
     FilingReactionData,
@@ -13,18 +13,17 @@ from backend.model import (
     SP500TickerSnapshot,
     SurpriseEndpointResponse,
 )
-from backend.sql_functions import (
-    DateValues,
-    SQLiteDatabase,
-    get_ticker_proportionality_data,
-    get_ticker_reaction,
+from backend.supabase import (
+    AsyncClient,
     get_ticker_surprise,
-    ticker_in_db,
-    upsert_proportionality_model,
+    get_ticker_reaction,
+    get_ticker_propotionality_data,
+    DateValues,
+    get_sp500_latest_surprises
 )
+
 from backend.helper_functions import (
     get_reaction_for_date,
-    get_surprise_for_date,
     normalize_date_str,
     normalize_x,
 )
@@ -34,36 +33,41 @@ logger = get_configured_logger(__name__)
 import asyncio
 import json
 import numpy as np
-from typing import Dict, List
-from fastapi import HTTPException
+from typing import Dict, List, cast
+from fastapi import HTTPException, APIRouter, Query
 from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-PLOT_OUTPUT_DIR = Path(__file__).resolve().parent / "generated_plots" / "proportionality"
+PLOT_OUTPUT_DIR = (
+    Path(__file__).resolve().parent / "generated_plots" / "proportionality"
+)
 
+
+reader_router = APIRouter(prefix="", tags=["reader"])
 
 def _sector_dir_name(sector: str) -> str:
     return sector.replace("/", "_")
 
-def _latest_entry(values: Dict[str, float]) -> tuple[str, float]:
-    latest_key = sorted(values.keys())[-1]
-    return latest_key, float(values[latest_key])
+
+# def _latest_entry(values: Dict[str, float]) -> tuple[str, float]:
+#     latest_key = sorted(values.keys())[-1]
+#     return latest_key, float(values[latest_key])
 
 
-def _company_details(ticker: str) -> tuple[str, str]:
-    company_rows = SP500_COMPANIES[SP500_COMPANIES["Symbol"] == ticker]
-    if len(company_rows) == 0:
-        raise HTTPException(
-            status_code=404,
-            detail=f"ticker {ticker} not found in S&P 500 list",
-        )
+# def _company_details(ticker: str) -> tuple[str, str]:
+#     company_rows = SP500_COMPANIES[SP500_COMPANIES["Symbol"] == ticker]
+#     if len(company_rows) == 0:
+#         raise HTTPException(
+#             status_code=404,
+#             detail=f"ticker {ticker} not found in S&P 500 list",
+#         )
 
-    company_name = str(company_rows["Security"].values[0])
-    sector = str(company_rows["GICS Sector"].values[0])
-    return company_name, sector
+#     company_name = str(company_rows["Security"].values[0])
+#     sector = str(company_rows["GICS Sector"].values[0])
+#     return company_name, sector
 
 
 def _filter_outliers_iqr(
@@ -86,7 +90,6 @@ def _filter_outliers_iqr(
         x_upper = x_q3 + 1.5 * x_iqr
         x_mask = (x_values >= x_lower) & (x_values <= x_upper)
 
-
     mask = x_mask
     if int(mask.sum()) < 2:
         return np.ones(len(x_values), dtype=bool)
@@ -95,28 +98,32 @@ def _filter_outliers_iqr(
 
 
 async def _compute_proportionality_model_for_ticker(
-    db: SQLiteDatabase,
+    sbac: AsyncClient,
     sector: str,
     tickers: list[str],
 ):
     Y = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
     unnormalized_x = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
-    logger.info(f"Computing proportionality model for sector {sector} with tickers: {tickers}")
+    logger.info(
+        f"Computing proportionality model for sector {sector} with tickers: {tickers}"
+    )
     reaction_results = await asyncio.gather(
         *[
-            fetch_reaction_for_ticker(
-                db,
+            _fetch_reaction_for_ticker(
+                sbac,
                 ticker,
                 ReactionRequest(reaction_days_threshold=3, surprise_threshold=0),
             )
             for ticker in tickers
         ],
-        return_exceptions=True, 
+        return_exceptions=True,
     )
 
     for reaction_data in reaction_results:
         if isinstance(reaction_data, BaseException):
-            logger.warning(f"Skipping a ticker due to error in fetching reaction data: {reaction_data}")
+            logger.warning(
+                f"Skipping a ticker due to error in fetching reaction data: {reaction_data}"
+            )
             continue
         for filing_date, filing_reaction_data in reaction_data["reaction_data"].items():
             if isinstance(filing_reaction_data["reaction"], str):
@@ -160,7 +167,8 @@ async def _compute_proportionality_model_for_ticker(
             f"Proportionality model for sector {sector} on date {date}: "
             f"alpha={alpha}, beta={beta}, x_mean={x_mean}, x_sd={x_sd}, num_samples={len(filing_y)}, filtered_samples={len(filtered_y)}"
         )
-        upsert_proportionality_model(db, sector, date, x_mean, x_sd, alpha, beta)
+        # TODO:
+        # upsert_proportionality_model(db, sector, date, x_mean, x_sd, alpha, beta)
         model_dict[date] = (x_mean, x_sd, alpha, beta)
 
         if len(unnormalized_x[date]) == 0:
@@ -183,7 +191,9 @@ async def _compute_proportionality_model_for_ticker(
             except Exception:
                 excluded_z = np.array([])
 
-        all_z_values = np.concatenate([x_values, excluded_z]) if excluded_z.size > 0 else x_values
+        all_z_values = (
+            np.concatenate([x_values, excluded_z]) if excluded_z.size > 0 else x_values
+        )
         x_min = float(np.min(all_z_values))
         x_max = float(np.max(all_z_values))
         if x_min == x_max:
@@ -258,21 +268,22 @@ async def _compute_proportionality_model_for_ticker(
     return model_dict
 
 
-async def health_check():
-    return {"status": "ok"}
-
-
 async def fetch_generated_proportionality_plot_data(
-    db: SQLiteDatabase,
+    sbac: AsyncClient,
     sector: str,
     filing_date: str,
 ) -> GeneratedProportionalityPlotResponse:
     normalized_filing_date = normalize_date_str(filing_date)
-    data_path = PLOT_OUTPUT_DIR / _sector_dir_name(sector) / f"{normalized_filing_date}.json"
+    data_path = (
+        PLOT_OUTPUT_DIR / _sector_dir_name(sector) / f"{normalized_filing_date}.json"
+    )
     if not data_path.exists():
-        sector_tickers: list[str] = SP500_COMPANIES[
-            SP500_COMPANIES["GICS Sector"] == sector
-        ]["Symbol"].dropna().astype(str).tolist()
+        sector_tickers: list[str] = (
+            SP500_COMPANIES[SP500_COMPANIES["GICS Sector"] == sector]["Symbol"]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
 
         if len(sector_tickers) == 0:
             raise HTTPException(
@@ -283,7 +294,7 @@ async def fetch_generated_proportionality_plot_data(
         logger.info(
             f"Generated plot data not found for sector {sector} on {normalized_filing_date}; computing on demand"
         )
-        await _compute_proportionality_model_for_ticker(db, sector, sector_tickers)
+        await _compute_proportionality_model_for_ticker(sbac, sector, sector_tickers)
 
     if not data_path.exists():
         raise HTTPException(
@@ -304,71 +315,86 @@ async def fetch_generated_proportionality_plot_data(
 
     return payload
 
+def get_sbac(router: APIRouter):
+    _state = getattr(reader_router, "state", None)
+    sbac = cast(AsyncClient, getattr(_state, "supabase_client")) if _state else None
+    if sbac is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Supabase client not initialized",
+        )
+    return sbac
 
-async def fetch_surprise_for_ticker(
-    db: SQLiteDatabase, ticker: str, filing_date: str | None
+@reader_router.get("/{ticker}/surprise")
+async def fetch_surprise_for_ticker(ticker: str, filing_date: str | None = Query(default=None)):
+    sbac = get_sbac(reader_router)
+    return await _fetch_surprise_for_ticker(sbac, ticker, filing_date)
+async def _fetch_surprise_for_ticker(
+    sbac: AsyncClient, ticker: str, filing_date: str | None
 ) -> SurpriseEndpointResponse:
 
     if filing_date is not None:
         filing_date = normalize_date_str(filing_date)
 
-    surprise = get_ticker_surprise(db, ticker, filing_date)
+    surprise = await get_ticker_surprise(sbac, ticker, filing_date)
     logger.info(f"Fetched surprise for {ticker} on {filing_date}: {surprise}")
-    if surprise is not None:
-        logger.info(
-            f"Surprise data found in database for {ticker} on {filing_date}, returning cached value"
-        )
-        return {"ticker": ticker, "surprise": surprise}
-
-    if ticker_in_db(db, ticker) is True:
+    if surprise is None:
         raise HTTPException(
             status_code=404,
-            detail=f"surprise data not found for ticker {ticker} on date {filing_date}, even though the ticker exists in the database, likely means that the date is not supported for this ticker",
+            detail=f"surprise data not found for ticker {ticker} on {filing_date}",
         )
+    # if surprise is not None:
+    logger.info(
+        f"Surprise data found in database for {ticker} on {filing_date}, returning cached value"
+    )
+    return {"ticker": ticker, "surprise": surprise}
 
-    eps_data = get_earnings_history_of_ticker(ticker)
-    if eps_data is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"the ticker {ticker} is not supported, check the /supported_tickers endpoint for the list of supported tickers",
-        )
+    # eps_data = get_earnings_history_of_ticker(ticker)
+    # if eps_data is None:
+    #     raise HTTPException(
+    #         status_code=404,
+    #         detail=f"the ticker {ticker} is not supported, check the /supported_tickers endpoint for the list of supported tickers",
+    #     )
 
-    if len(eps_data) == 0:
-        raise HTTPException(
-            status_code=404,
-            detail=f"EPS data incomplete for ticker {ticker} on {filing_date}",
-        )
+    # if len(eps_data) == 0:
+    #     raise HTTPException(
+    #         status_code=404,
+    #         detail=f"EPS data incomplete for ticker {ticker} on {filing_date}",
+    #     )
 
-    date_to_surprise: Dict[str, float] = {}
+    # date_to_surprise: Dict[str, float] = {}
 
-    for row_date, row in eps_data.iterrows():
-        logger.info(f"Processing EPS data for {ticker} on {row_date}")
-        logger.info(f"Row data: {row.to_dict()}")
-        trailing_eps = row.get("epsActual")
-        forward_eps = row.get("epsEstimate")
-        logger.info(
-            f"Processing EPS data for {ticker} on {row_date}: actual={trailing_eps}, estimate={forward_eps}"
-        )
-        if trailing_eps is None or forward_eps is None:
-            continue
+    # for row_date, row in eps_data.iterrows():
+    #     logger.info(f"Processing EPS data for {ticker} on {row_date}")
+    #     logger.info(f"Row data: {row.to_dict()}")
+    #     trailing_eps = row.get("epsActual")
+    #     forward_eps = row.get("epsEstimate")
+    #     logger.info(
+    #         f"Processing EPS data for {ticker} on {row_date}: actual={trailing_eps}, estimate={forward_eps}"
+    #     )
+    #     if trailing_eps is None or forward_eps is None:
+    #         continue
 
-        normalized_row_date = normalize_date_str(str(row_date))
-        surprise = get_surprise_for_date(
-            db, ticker, trailing_eps, forward_eps, normalized_row_date
-        )
-        date_to_surprise[normalized_row_date] = surprise
+    #     normalized_row_date = normalize_date_str(str(row_date))
+    #     surprise = get_surprise_for_date(
+    #         db, ticker, trailing_eps, forward_eps, normalized_row_date
+    #     )
+    #     date_to_surprise[normalized_row_date] = surprise
 
-    if filing_date is not None:
-        return {
-            "ticker": ticker,
-            "surprise": {filing_date: date_to_surprise[filing_date]},
-        }
+    # if filing_date is not None:
+    #     return {
+    #         "ticker": ticker,
+    #         "surprise": {filing_date: date_to_surprise[filing_date]},
+    #     }
 
-    return {"ticker": ticker, "surprise": date_to_surprise}
+    # return {"ticker": ticker, "surprise": date_to_surprise}
 
-
-async def fetch_reaction_for_ticker(
-    db: SQLiteDatabase, ticker: str, reaction_request: ReactionRequest
+@reader_router.get("/{ticker}/reaction")
+async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionRequest = Query(...)):
+    sbac = get_sbac(reader_router)
+    return await _fetch_reaction_for_ticker(sbac, ticker, reaction_request)
+async def _fetch_reaction_for_ticker(
+    sbac: AsyncClient, ticker: str, reaction_request: ReactionRequest
 ) -> ReactionEndpointResponse:
     surprise_threshold = reaction_request.surprise_threshold
     market_index = reaction_request.market_index
@@ -385,7 +411,7 @@ async def fetch_reaction_for_ticker(
     )
 
     try:
-        surprise = await fetch_surprise_for_ticker(db, ticker, filing_date)
+        surprise = await _fetch_surprise_for_ticker(sbac, ticker, filing_date)
         logger.info(f"Fetched surprise data for {ticker}: {surprise}")
     except HTTPException as e:
         logger.error(f"Error fetching surprise data for {ticker}: {e.detail}")
@@ -409,10 +435,9 @@ async def fetch_reaction_for_ticker(
 
     for filing_date in valid_filings_date:
         try:
-            reaction = get_reaction_for_date(
-                db,
+            reaction = await get_reaction_for_date(
+                sbac,
                 ticker,
-                market_index,
                 filing_date,
                 reaction_date,
                 reaction_request.reaction_days_threshold,
@@ -464,20 +489,28 @@ async def fetch_reaction_for_ticker(
     }
 
 
-async def fetch_surprise_and_latest_reaction(
-    db: SQLiteDatabase,
+async def _fetch_surprise_and_latest_reaction(
+    sbac: AsyncClient,
     ticker: str,
     filings_date: str,
 ):
-    surprise_data = get_ticker_surprise(db, ticker, filings_date)
-    reaction_data = get_ticker_reaction(db, ticker, filing_date=filings_date)
+    surprise_data = await get_ticker_surprise(sbac, ticker, filings_date)
+    reaction_data = await get_ticker_reaction(sbac, ticker, filing_date=filings_date)
 
-    if surprise_data is not None and reaction_data is not None and filings_date in surprise_data and filings_date in reaction_data:
+    if (
+        surprise_data is not None
+        and reaction_data is not None
+        and filings_date in surprise_data
+        and filings_date in reaction_data
+    ):
         latest_reaction_key = sorted(reaction_data[filings_date].keys())[-1]
-        return surprise_data[filings_date], reaction_data[filings_date][latest_reaction_key]
+        return (
+            surprise_data[filings_date],
+            reaction_data[filings_date][latest_reaction_key],
+        )
 
-    surprise_reaction_data = await fetch_reaction_for_ticker(
-        db,
+    surprise_reaction_data = await _fetch_reaction_for_ticker(
+        sbac,
         ticker,
         ReactionRequest(
             reaction_days_threshold=3,
@@ -507,9 +540,12 @@ async def fetch_surprise_and_latest_reaction(
 
     return surprise_value, reaction_value
 
-
-async def fetch_proportionality_for_ticker(
-    db: SQLiteDatabase,
+@reader_router.get("/{ticker}/proportionate")
+async def fetch_proportionality_for_ticker(ticker: str, proportionate_request: PropotionateRequest = Query(...)):
+    sbac = get_sbac(reader_router)
+    return await _fetch_proportionality_for_ticker(sbac, ticker, proportionate_request)
+async def _fetch_proportionality_for_ticker(
+    sbac: AsyncClient,
     ticker: str,
     proportionate_request: PropotionateRequest,
 ):
@@ -527,8 +563,8 @@ async def fetch_proportionality_for_ticker(
         "GICS Sector"
     ].values[0]
 
-    proportionality_data = get_ticker_proportionality_data(
-        db, ticker_sector, filings_date
+    proportionality_data = await get_ticker_propotionality_data(
+        sbac, ticker_sector, filings_date
     )
 
     if proportionality_data is None:
@@ -536,7 +572,7 @@ async def fetch_proportionality_for_ticker(
             SP500_COMPANIES["GICS Sector"] == ticker_sector
         ]["Symbol"].tolist()
         proportionality_data = await _compute_proportionality_model_for_ticker(
-            db, ticker_sector, all_companies_in_sector
+            sbac, ticker_sector, all_companies_in_sector
         )
 
     valid_dates = (
@@ -548,11 +584,11 @@ async def fetch_proportionality_for_ticker(
     pct_diff_dict: DateValues[ProportionalityResponseEntry] = {}
     for date in valid_dates:
         actual_surprise, actual_CAR = (
-            await fetch_surprise_and_latest_reaction(db, ticker, date)
+            await _fetch_surprise_and_latest_reaction(sbac, ticker, date)
             if filings_date is not None
             else (
-                float(proportionate_request.surprise), # type: ignore
-                float(proportionate_request.cumalative_reaction), # type: ignore
+                float(proportionate_request.surprise),  # type: ignore
+                float(proportionate_request.cumalative_reaction),  # type: ignore
             )
         )
 
@@ -578,48 +614,34 @@ async def fetch_proportionality_for_ticker(
     return pct_diff_dict
 
 
-async def _build_snapshot_for_ticker(
-    db: SQLiteDatabase,
-    ticker: str,
-    semaphore: asyncio.Semaphore,
-) -> SP500TickerSnapshot | None:
-    async with semaphore:
-        try:
-            surprise_payload = await fetch_surprise_for_ticker(db, ticker, filing_date=None)
-            if len(surprise_payload["surprise"]) == 0:
-                return None
+# async def _build_snapshot_for_ticker(
+#     sbac: AsyncClient,
+#     ticker: str,
+#     semaphore: asyncio.Semaphore,
+# ) -> SP500TickerSnapshot | None:
+#     async with semaphore:
+#         try:
+#             surprise_payload = await _fetch_surprise_for_ticker(
+#                 sbac, ticker, filing_date=None
+#             )
+#             if len(surprise_payload["surprise"]) == 0:
+#                 return None
 
-            filing_date, surprise = _latest_entry(surprise_payload["surprise"])
-            company_name, sector = _company_details(ticker)
-            return {
-                "ticker": ticker,
-                "company_name": company_name,
-                "sector": sector,
-                "filing_date": filing_date,
-                "surprise": surprise,
-            }
-        except Exception as exc:
-            logger.warning(f"Skipping ticker {ticker}; unable to build snapshot: {exc}")
-            return None
+#             filing_date, surprise = _latest_entry(surprise_payload["surprise"])
+#             company_name, sector = _company_details(ticker)
+#             return {
+#                 "ticker": ticker,
+#                 "company_name": company_name,
+#                 "sector": sector,
+#                 "filing_date": filing_date,
+#                 "surprise": surprise,
+#             }
+#         except Exception as exc:
+#             logger.warning(f"Skipping ticker {ticker}; unable to build snapshot: {exc}")
+#             return None
 
 
-async def fetch_sp500_surprises(
-    db: SQLiteDatabase,
-    limit: int | None = None,
-) -> SP500SurprisesResponse:
-    tickers: list[str] = SP500_COMPANIES["Symbol"].dropna().astype(str).tolist()
-    semaphore = asyncio.Semaphore(12)
-    snapshots = await asyncio.gather(
-        *[_build_snapshot_for_ticker(db, ticker, semaphore) for ticker in tickers]
-    )
-
-    valid_snapshots = [snapshot for snapshot in snapshots if snapshot is not None]
-    valid_snapshots.sort(key=lambda row: abs(row["surprise"]), reverse=True)
-
-    if limit is not None:
-        valid_snapshots = valid_snapshots[:limit]
-
-    return {
-        "count": len(valid_snapshots),
-        "items": valid_snapshots,
-    }
+@reader_router.get("/sp500/surprises")
+async def fetch_sp500_surprises():
+    sbac = get_sbac(reader_router)
+    return await get_sp500_latest_surprises(sbac)

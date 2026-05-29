@@ -5,18 +5,28 @@ Created by [Harsh Vardhan Gupta](https://github.com/hvgupta)
 
 ### 1. Install UV itself
 
-If `uv` is not already installed on your machine, install it with Python first:
+If you prefer the project's helper scripts, you do not need to install `uv` yourself. The repository includes convenience launch scripts for Linux and Windows which handle starting the backend and frontend together.
 
-#### macOS / Linux
+#### Linux / macOS
+
+Run the provided shell script from the repository root:
+
+```bash
+./launch-application-linux.sh
+```
+
+#### Windows (PowerShell)
+
+Run the provided PowerShell script from the repository root:
+
+```powershell
+./launch-application-windows.ps1
+```
+
+If you still want to install `uv` manually, you can use:
 
 ```bash
 python3 -m pip install uv
-```
-
-#### Windows PowerShell
-
-```powershell
-py -m pip install uv
 ```
 
 ### 2. Clone the repository
@@ -26,37 +36,30 @@ git clone https://github.com/hvgupta/Stock-Surprise-and-Reaction.git
 cd Stock-Surprise-and-Reaction
 ```
 
-### 3. Install the project with UV
+### 3. Install dependencies
 
-#### macOS / Linux
+If you prefer to prepare the environment manually (instead of using the launch scripts), follow these steps.
 
-```bash
-uv sync
-```
-
-#### Windows PowerShell
-
-```powershell
-uv sync
-```
-
-If you want to create the environment explicitly first, UV can do that too:
+Linux / macOS / Windows (WSL / PowerShell):
 
 ```bash
-uv venv
+# create a virtual environment and install Python deps
+python3 -m pip install -r requirements.txt  # or use the pyproject/uv.lock flow if desired
+
+# install frontend deps
+cd frontend && npm install
 ```
 
-### 4. Run the application
+### 4. Run the application locally (manual)
+
+If you want to start backend and frontend separately instead of using the provided launch scripts:
 
 ```bash
-uv run fastapi run backend/app.py
-```
+# start backend (from repo root)
+uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000
 
-### 5. Run the Next.js frontend
-
-```bash
+# in a separate terminal, start frontend
 cd frontend
-npm install
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 

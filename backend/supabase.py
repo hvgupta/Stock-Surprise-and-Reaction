@@ -1,9 +1,11 @@
 from backend.logger import get_configured_logger
 
 from supabase import AsyncClient
-from typing import Optional, Dict, Any, cast, Tuple
+from typing import Optional, Dict, Any, cast, Tuple, TypeVar
 
-type DateValues[T] = Dict[str, T]
+# Python 3.11-compatible generic type alias
+T = TypeVar("T")
+DateValues = Dict[str, T]
 
 logger = get_configured_logger(__name__)
 

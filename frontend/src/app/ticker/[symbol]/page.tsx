@@ -234,8 +234,8 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   const proportionFlag = useMemo(() => {
     const pct = proportionalityEntry?.pct_diff;
     if (typeof pct !== "number") return { label: "Unknown", style: "bg-zinc-50 text-zinc-700" };
-    if (pct > 0.2) return { label: "Above proportionate", style: "bg-blue-50 text-blue-700" };
-    if (pct < -0.2) return { label: "Below proportionate", style: "bg-red-50 text-red-700" };
+    if (pct > 0.1) return { label: "Above proportionate", style: "bg-blue-50 text-blue-700" };
+    if (pct < -0.1) return { label: "Below proportionate", style: "bg-red-50 text-red-700" };
     return { label: "Approximately proportionate", style: "bg-zinc-50 text-zinc-700" };
   }, [proportionalityEntry]);
 

@@ -1550,7 +1550,6 @@ dependencies = [
     { name = "aiohttp" },
     { name = "fastapi", extra = ["standard"] },
     { name = "lxml" },
-    { name = "matplotlib" },
     { name = "mypy" },
     { name = "pandas" },
     { name = "pydantic" },
@@ -1563,6 +1562,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "ipykernel" },
+    { name = "matplotlib" },
 ]
 
 [package.metadata]
@@ -1570,7 +1570,6 @@ requires-dist = [
     { name = "aiohttp" },
     { name = "fastapi", extras = ["standard"] },
     { name = "lxml", specifier = ">=6.1.0" },
-    { name = "matplotlib", specifier = ">=3.10.0" },
     { name = "mypy", specifier = ">=1.20.2" },
     { name = "pandas", specifier = ">=3.0.2" },
     { name = "pydantic", specifier = ">=2.13.3" },
@@ -1581,7 +1580,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ipykernel", specifier = ">=7.2.0" }]
+dev = [
+    { name = "ipykernel", specifier = ">=7.2.0" },
+    { name = "matplotlib", specifier = ">=3.10.9" },
+]
 
 [[package]]
 name = "markupsafe"

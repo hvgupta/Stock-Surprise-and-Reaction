@@ -7,7 +7,6 @@ SURPRISE_THRESHOLD = 0.03
 
 class ReactionRequest(BaseModel):
     reaction_days_threshold: int = Query(default=1, ge=1, lt=4)
-    market_index: str = Query(default="SPY")
     surprise_threshold: float = Query(default=SURPRISE_THRESHOLD)
     filings_date: Optional[str] = Query(default=None)
     reaction_date: Optional[str] = Query(default=None)

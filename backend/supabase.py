@@ -11,110 +11,112 @@ SUPABASE_URL = "https://xtetgruwektiyndlfvju.supabase.co"
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ME2wkmZCDfW1TceAK4WaiQ_WqqANIsr"
 
 
-def create_async_client(API_KEY: str = SUPABASE_PUBLISHABLE_KEY):
-    return AsyncClient(SUPABASE_URL, API_KEY)
+def create_async_client(API_KEY: Optional[str]):
+    logger.info("Creating Supabase AsyncClient")
+    return AsyncClient(SUPABASE_URL, API_KEY or SUPABASE_PUBLISHABLE_KEY)
 
 
 async def get_ticker_surprise(
-    sbac: AsyncClient, ticker: str, filing_date: Optional[str] = None
+    sbac: AsyncClient, symbol: str, filings_date: Optional[str] = None
 ) -> Optional[DateValues[float]]:
-    query = sbac.table("surprises").select("filing_date, surprise").eq("ticker", ticker)
-    if filing_date:
-        query = query.eq("filing_date", filing_date)
+    query = sbac.table("ticker_data").select("filings_date, surprise").eq("symbol", symbol)
+    if filings_date:
+        query = query.eq("filings_date", filings_date)
 
     try:
         result = await query.execute()
     except Exception as e:
-        logger.error(f"Error fetching surprise for {ticker} on {filing_date}: {e}")
+        logger.error(f"Error fetching surprise for {symbol} on {filings_date}: {e}")
         return None
-
+    logger.info(f"Result for {symbol} on {filings_date}: {result}")
     if result is None:
-        logger.warning(f"No surprise found for {ticker} on {filing_date}")
+        logger.warning(f"No surprise found for {symbol} on {filings_date}")
         return None
 
     data = cast(list[dict[str, Any]], result.data or [])
     return {
-        row["filing_date"]: row["surprise"]
+        row["filings_date"]: row["surprise"]
         for row in data
-        if isinstance(row.get("filing_date"), str)
+        if isinstance(row.get("filings_date"), str)
         and isinstance(row.get("surprise"), (int, float))
     }
 
 
 async def get_ticker_reaction(
     sbac: AsyncClient,
-    ticker: str,
-    filing_date: Optional[str] = None,
+    symbol: str,
+    filings_date: Optional[str] = None,
     reaction_date: Optional[str] = None,
 ) -> Optional[DateValues[DateValues[float]]]:
     query = (
-        sbac.table("reactions")
-        .select("filing_date, reaction_date, reaction")
-        .eq("ticker", ticker)
+        sbac.table("ticker_data")
+        .select("filings_date, reaction_date, reaction")
+        .eq("symbol", symbol)
     )
-    if filing_date:
-        query = query.eq("filing_date", filing_date)
+    if filings_date:
+        query = query.eq("filings_date", filings_date)
     if reaction_date:
         query = query.eq("reaction_date", reaction_date)
 
+    query = query.order("reaction_date")
     try:
         result = await query.execute()
     except Exception as e:
         logger.error(
-            f"Error fetching reaction for {ticker} on {filing_date} and {reaction_date}: {e}"
+            f"Error fetching reaction for {symbol} on {filings_date} and {reaction_date}: {e}"
         )
         return None
 
     if result is None:
         logger.warning(
-            f"No reaction found for {ticker} on {filing_date} and {reaction_date}"
+            f"No reaction found for {symbol} on {filings_date} and {reaction_date}"
         )
         return None
 
     data = cast(list[dict[str, Any]], result.data or [])
     reactions_by_filing_date: Dict[str, DateValues[float]] = {}
     for row in data:
-        filing_date = row.get("filing_date")
+        filings_date = row.get("filings_date")
         reaction_date = row.get("reaction_date")
         reaction = row.get("reaction")
         if (
-            isinstance(filing_date, str)
+            isinstance(filings_date, str)
             and isinstance(reaction_date, str)
             and isinstance(reaction, (int, float))
         ):
-            if filing_date not in reactions_by_filing_date:
-                reactions_by_filing_date[filing_date] = {}
-            reactions_by_filing_date[filing_date][reaction_date] = reaction
+            if filings_date not in reactions_by_filing_date:
+                reactions_by_filing_date[filings_date] = {}
+            reactions_by_filing_date[filings_date][reaction_date] = reaction
     return reactions_by_filing_date
 
 
 async def get_ticker_propotionality_data(
-    sbac: AsyncClient, sector: str, filing_date: Optional[str] = None
+    sbac: AsyncClient, sector: str, filings_date: Optional[str] = None
 ) -> Optional[DateValues[Tuple[float, float, float, float]]]:
     query = (
-        sbac.table("proportionality")
-        .select("filing_date, pct_surprise_mean, pct_surprise_sd, alpha, beta")
+        sbac.table("proportionality_model")
+        .select("filings_date, pct_surprise_mean, pct_surprise_sd, alpha, beta")
         .eq("sector", sector)
     )
-    if filing_date:
-        query = query.eq("filing_date", filing_date)
+    if filings_date:
+        query = query.eq("filings_date", filings_date)
     try:
         result = await query.execute()
     except Exception as e:
         logger.error(
-            f"Error fetching proportionality data for sector {sector} on {filing_date}: {e}"
+            f"Error fetching proportionality data for sector {sector} on {filings_date}: {e}"
         )
         return None
 
     if result is None:
         logger.warning(
-            f"No proportionality data found for sector {sector} on {filing_date}"
+            f"No proportionality data found for sector {sector} on {filings_date}"
         )
         return None
 
     data = cast(list[dict[str, Any]], result.data or [])
     return {
-        row["filing_date"]: (
+        row["filings_date"]: (
             row["pct_surprise_mean"],
             row["pct_surprise_sd"],
             row["alpha"],
@@ -141,7 +143,7 @@ async def get_model_data_points(sbac: AsyncClient, sector: str, filings_date: st
             await sbac.table("data_points")
             .select("data")
             .eq("sector", sector)
-            .eq("filing_date", filings_date)
+            .eq("filings_date", filings_date)
             .maybe_single()
             .execute()
         )
@@ -162,3 +164,29 @@ async def get_model_data_points(sbac: AsyncClient, sector: str, filings_date: st
             f"Error fetching model data points for sector {sector} on {filings_date}: {e}"
         )
         return None
+    
+async def insert_model_data_points(admin_sbac: AsyncClient, sector: str, filings_date: str, data_points: dict):
+    try:
+        await admin_sbac.table("data_points").insert({
+            "sector": sector,
+            "filings_date": filings_date,
+            "data": data_points
+        }).execute()
+        logger.info(f"Successfully inserted model data points for sector {sector} on {filings_date}")
+    except Exception as e:
+        logger.error(f"Error inserting model data points for sector {sector} on {filings_date}: {e}")
+
+
+async def insert_proportionality_model(admin_sbac: AsyncClient, sector: str, filings_date: str, pct_surprise_mean: float, pct_surprise_sd: float, alpha: float, beta: float):
+    try:
+        await admin_sbac.table("proportionality_model").insert({
+            "sector": sector,
+            "filings_date": filings_date,
+            "pct_surprise_mean": pct_surprise_mean,
+            "pct_surprise_sd": pct_surprise_sd,
+            "alpha": alpha,
+            "beta": beta
+        }).execute()
+        logger.info(f"Successfully inserted proportionality model for sector {sector} on {filings_date}")
+    except Exception as e:
+        logger.error(f"Error inserting proportionality model for sector {sector} on {filings_date}: {e}")

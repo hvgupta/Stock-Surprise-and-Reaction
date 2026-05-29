@@ -1,3 +1,5 @@
+from .sbac import get_sbac
+
 from backend.adapters import SP500_COMPANIES, get_1d_return_of_ticker
 from backend.logger import get_configured_logger
 from backend.model import (
@@ -18,39 +20,33 @@ from backend.supabase import (
     get_ticker_propotionality_data,
     DateValues,
     get_sp500_latest_surprises,
-    get_model_data_points
+    get_model_data_points,
 )
 
 from backend.helper_functions import (
     get_reaction_for_date,
     normalize_date_str,
-    normalize_x,
 )
 
 from typing import cast
 
 logger = get_configured_logger(__name__)
 
-import asyncio
-import json
-import numpy as np
+from datetime import datetime
 from typing import Dict, List, cast
-from fastapi import HTTPException, APIRouter, Query
-from pathlib import Path
+from fastapi import HTTPException, APIRouter, Depends, Path, Query, Request, Path
+# from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-PLOT_OUTPUT_DIR = (
-    Path(__file__).resolve().parent / "generated_plots" / "proportionality"
-)
-
 
 reader_router = APIRouter(prefix="", tags=["reader"])
 
-def _sector_dir_name(sector: str) -> str:
-    return sector.replace("/", "_")
+
+# def _sector_dir_name(sector: str) -> str:
+#     return sector.replace("/", "_")
 
 
 # def _latest_entry(values: Dict[str, float]) -> tuple[str, float]:
@@ -71,214 +67,11 @@ def _sector_dir_name(sector: str) -> str:
 #     return company_name, sector
 
 
-def _filter_outliers_iqr(
-    x_values: np.ndarray,
-) -> np.ndarray:
-    if len(x_values) < 4:
-        return np.ones(len(x_values), dtype=bool)
-
-    x_q1, x_q3 = np.percentile(x_values, [25, 75])
-
-    x_iqr = x_q3 - x_q1
-
-    if x_iqr <= 0:
-        return np.ones(len(x_values), dtype=bool)
-
-    x_mask = np.ones(len(x_values), dtype=bool)
-
-    if x_iqr > 0:
-        x_lower = x_q1 - 1.5 * x_iqr
-        x_upper = x_q3 + 1.5 * x_iqr
-        x_mask = (x_values >= x_lower) & (x_values <= x_upper)
-
-    mask = x_mask
-    if int(mask.sum()) < 2:
-        return np.ones(len(x_values), dtype=bool)
-
-    return mask
-
-
-async def _compute_proportionality_model_for_ticker(
-    sbac: AsyncClient,
-    sector: str,
-    tickers: list[str],
-):
-    Y = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
-    unnormalized_x = {"2025-09-30": [], "2025-12-31": [], "2026-03-31": []}
-    logger.info(
-        f"Computing proportionality model for sector {sector} with tickers: {tickers}"
-    )
-    reaction_results = await asyncio.gather(
-        *[
-            _fetch_reaction_for_ticker(
-                sbac,
-                ticker,
-                ReactionRequest(reaction_days_threshold=3, surprise_threshold=0),
-            )
-            for ticker in tickers
-        ],
-        return_exceptions=True,
-    )
-
-    for reaction_data in reaction_results:
-        if isinstance(reaction_data, BaseException):
-            logger.warning(
-                f"Skipping a ticker due to error in fetching reaction data: {reaction_data}"
-            )
-            continue
-        for filing_date, filing_reaction_data in reaction_data["reaction_data"].items():
-            if isinstance(filing_reaction_data["reaction"], str):
-                continue
-            filing_date_norm = normalize_date_str(filing_date)
-            latest_reaction_key = sorted(filing_reaction_data["reaction"].keys())[-1]
-            latest_reaction_val = filing_reaction_data["reaction"][latest_reaction_key]
-            surprise = filing_reaction_data["surprise"]
-
-            for target_date in Y.keys():
-                if target_date <= filing_date_norm:
-                    continue
-                unnormalized_x[target_date].append(float(surprise))
-                Y[target_date].append(float(latest_reaction_val))
-
-    model_dict: DateValues[tuple[float, float, float, float]] = {}
-    for date in Y.keys():
-        # perform outlier filtering on raw surprise values before normalization
-        x_raw = np.array(unnormalized_x[date], dtype=np.float64)
-        filing_y = np.array(Y[date], dtype=np.float64)
-
-        fit_mask = _filter_outliers_iqr(filing_y)
-        filtered_raw = x_raw[fit_mask]
-        filtered_y = filing_y[fit_mask]
-
-        # compute excluded (outlier) raw values for plotting and domain calculation
-        excluded_raw = x_raw[~fit_mask]
-        excluded_y = filing_y[~fit_mask]
-
-        if len(filtered_raw) == 0:
-            logger.warning(
-                f"No inlier samples after filtering for sector {sector} on date {date}; skipping"
-            )
-            continue
-
-        # normalize using only the filtered (inlier) raw surprises
-        normalized_filtered_x, x_mean, x_sd = normalize_x(filtered_raw.tolist())
-        beta, alpha = np.polyfit(normalized_filtered_x, filtered_y, deg=1)
-
-        logger.info(
-            f"Proportionality model for sector {sector} on date {date}: "
-            f"alpha={alpha}, beta={beta}, x_mean={x_mean}, x_sd={x_sd}, num_samples={len(filing_y)}, filtered_samples={len(filtered_y)}"
-        )
-        # TODO:
-        # upsert_proportionality_model(db, sector, date, x_mean, x_sd, alpha, beta)
-        model_dict[date] = (x_mean, x_sd, alpha, beta)
-
-        if len(unnormalized_x[date]) == 0:
-            logger.warning(
-                f"Skipping plot export for sector {sector} on date {date}: no samples available"
-            )
-            continue
-
-        # compute z-scores for all raw values using the inlier mean/sd so excluded
-        # points appear in the same normalized coordinate system as the fit
-        if x_sd == 0:
-            x_sd = 1e-9
-        x_values = normalized_filtered_x
-        y_values = filtered_y
-        # compute excluded z-scores so the regression line spans the full plotted domain
-        excluded_z: np.ndarray = np.array([])
-        if len(excluded_raw) > 0:
-            try:
-                excluded_z = (excluded_raw - x_mean) / (x_sd if x_sd != 0 else 1e-9)
-            except Exception:
-                excluded_z = np.array([])
-
-        all_z_values = (
-            np.concatenate([x_values, excluded_z]) if excluded_z.size > 0 else x_values
-        )
-        x_min = float(np.min(all_z_values))
-        x_max = float(np.max(all_z_values))
-        if x_min == x_max:
-            x_min -= 0.01
-            x_max += 0.01
-
-        x_line = np.linspace(x_min, x_max, 200)
-        y_line = alpha + beta * x_line
-
-        plot_dir = PLOT_OUTPUT_DIR / sector.replace("/", "_")
-        plot_dir.mkdir(parents=True, exist_ok=True)
-        plot_path = plot_dir / f"{date}.png"
-        plot_data_path = plot_dir / f"{date}.json"
-
-        fig, ax = plt.subplots(figsize=(8, 5), dpi=150)
-        ax.scatter(
-            x_values,
-            y_values,
-            color="black",
-            s=22,
-            alpha=0.85,
-            label="Data points",
-        )
-        ax.plot(x_line, y_line, color="red", linewidth=2.5, label="Regression line")
-        ax.axhline(0, color="#9ca3af", linewidth=1, linestyle="--")
-        ax.axvline(0, color="#9ca3af", linewidth=1, linestyle="--")
-        ax.set_title(f"{sector} proportionality on {date}")
-        ax.set_xlabel("Surprise z-score")
-        ax.set_ylabel("CAR / Reaction")
-        ax.legend(loc="best")
-        ax.grid(True, linestyle=":", linewidth=0.8, alpha=0.5)
-        fig.tight_layout()
-        fig.savefig(plot_path, bbox_inches="tight")
-        plt.close(fig)
-
-        points: list[GeneratedProportionalityPoint] = [
-            {
-                "z_score": float(z_val),
-                "reaction": float(y_val),
-            }
-            for z_val, y_val in zip(x_values.tolist(), y_values.tolist())
-        ]
-        outliers: list[GeneratedProportionalityPoint] = [
-            {
-                "z_score": float((raw_val - x_mean) / x_sd),
-                "reaction": float(y_val),
-            }
-            for raw_val, y_val in zip(excluded_raw.tolist(), excluded_y.tolist())
-        ]
-        line_points: list[GeneratedProportionalityLinePoint] = [
-            {
-                "z_score": float(z_val),
-                "expected_reaction": float(y_val),
-            }
-            for z_val, y_val in zip(x_line.tolist(), y_line.tolist())
-        ]
-
-        plot_payload: GeneratedProportionalityPlotResponse = {
-            "sector": sector,
-            "filing_date": date,
-            "alpha": float(alpha),
-            "beta": float(beta),
-            "x_mean": float(x_mean),
-            "x_sd": float(x_sd),
-            "points": points,
-            "outliers": outliers,
-            "line_points": line_points,
-        }
-        plot_data_path.write_text(json.dumps(plot_payload), encoding="utf-8")
-        logger.info(f"Saved proportionality plot to {plot_path}")
-
-    return model_dict
-
 @reader_router.get("/generated_plots/proportionality/data")
 async def fetch_generated_proportionality_plot_data(
+    sbac: AsyncClient = Depends(get_sbac),
     sector: str = Query(...),
     filing_date: str = Query(...),
-):
-    sbac = get_sbac(reader_router)
-    return await _fetch_generated_proportionality_plot_data(sbac, sector, filing_date)
-async def _fetch_generated_proportionality_plot_data(
-    sbac: AsyncClient,
-    sector: str,
-    filing_date: str,
 ) -> GeneratedProportionalityPlotResponse:
     data_points = await get_model_data_points(sbac, sector, filing_date)
     if data_points is None:
@@ -286,7 +79,9 @@ async def _fetch_generated_proportionality_plot_data(
             status_code=404,
             detail=f"No proportionality model data found for sector {sector} on filing date {filing_date}",
         )
-    proportionality_data = await get_ticker_propotionality_data(sbac, sector, filing_date)
+    proportionality_data = await get_ticker_propotionality_data(
+        sbac, sector, filing_date
+    )
     if proportionality_data is None:
         raise HTTPException(
             status_code=404,
@@ -302,27 +97,19 @@ async def _fetch_generated_proportionality_plot_data(
         "beta": beta,
         "points": cast(List[GeneratedProportionalityPoint], data_points["points"]),
         "outliers": cast(List[GeneratedProportionalityPoint], data_points["outliers"]),
-        "line_points": cast(List[GeneratedProportionalityLinePoint], data_points["line_points"]),
+        "line_points": cast(
+            List[GeneratedProportionalityLinePoint], data_points["line_points"]
+        ),
     }
 
-def get_sbac(router: APIRouter):
-    _state = getattr(reader_router, "state", None)
-    sbac = cast(AsyncClient, getattr(_state, "supabase_client")) if _state else None
-    if sbac is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Supabase client not initialized",
-        )
-    return sbac
 
 @reader_router.get("/{ticker}/surprise")
-async def fetch_surprise_for_ticker(ticker: str, filing_date: str | None = Query(default=None)):
-    sbac = get_sbac(reader_router)
-    return await _fetch_surprise_for_ticker(sbac, ticker, filing_date)
-async def _fetch_surprise_for_ticker(
-    sbac: AsyncClient, ticker: str, filing_date: str | None
+async def fetch_surprise_for_ticker(
+    sbac: AsyncClient = Depends(get_sbac),
+    ticker: str = Path(),
+    filing_date: str | None = Query(default=None)
 ) -> SurpriseEndpointResponse:
-
+    logger.info(f"Received request for surprise data for ticker {ticker} on filing date {filing_date}")
     if filing_date is not None:
         filing_date = normalize_date_str(filing_date)
 
@@ -379,17 +166,17 @@ async def _fetch_surprise_for_ticker(
 
     # return {"ticker": ticker, "surprise": date_to_surprise}
 
+
 @reader_router.get("/{ticker}/reaction")
-async def fetch_reaction_for_ticker(ticker: str, reaction_request: ReactionRequest = Query(...)):
-    sbac = get_sbac(reader_router)
-    return await _fetch_reaction_for_ticker(sbac, ticker, reaction_request)
-async def _fetch_reaction_for_ticker(
-    sbac: AsyncClient, ticker: str, reaction_request: ReactionRequest
+async def fetch_reaction_for_ticker(
+    sbac: AsyncClient = Depends(get_sbac),
+    ticker: str = Path(),
+    reaction_request: ReactionRequest = Query(...)
 ) -> ReactionEndpointResponse:
     surprise_threshold = reaction_request.surprise_threshold
-    market_index = reaction_request.market_index
+    threshold_reaction_days = reaction_request.reaction_days_threshold
 
-    filing_date = (
+    filings_date = (
         normalize_date_str(reaction_request.filings_date)
         if reaction_request.filings_date is not None
         else None
@@ -401,7 +188,7 @@ async def _fetch_reaction_for_ticker(
     )
 
     try:
-        surprise = await _fetch_surprise_for_ticker(sbac, ticker, filing_date)
+        surprise = await fetch_surprise_for_ticker(sbac, ticker, filings_date)
         logger.info(f"Fetched surprise data for {ticker}: {surprise}")
     except HTTPException as e:
         logger.error(f"Error fetching surprise data for {ticker}: {e.detail}")
@@ -423,55 +210,42 @@ async def _fetch_reaction_for_ticker(
 
     date_to_reaction_data: Dict[str, FilingReactionData] = {}
 
-    for filing_date in valid_filings_date:
+    for filings_date in valid_filings_date:
+        reaction = await get_reaction_for_date(
+            sbac,
+            ticker,
+            filings_date,
+            reaction_date,
+            reaction_request.reaction_days_threshold,
+        )
+        if reaction is None:
+            continue
+
+        logger.info(f"the reaction is {reaction}")
+
+        # Build market cumulative returns series aligned to the reaction dates
+        market_map: Dict[str, float] = {}
         try:
-            reaction = await get_reaction_for_date(
-                sbac,
-                ticker,
-                filing_date,
-                reaction_date,
-                reaction_request.reaction_days_threshold,
-            )
-            if reaction is None:
-                continue
-
-            logger.info(f"the reaction is {reaction}")
-
-            # Build market cumulative returns series aligned to the reaction dates
-            market_map: Dict[str, float] = {}
-            try:
-                sorted_dates = sorted(reaction[filing_date].keys())
-                cumulative_market = 0.0
-                for d in sorted_dates:
-                    # one-day return for the market index on this date
-                    from datetime import datetime
-
-                    dt = datetime.strptime(d, "%Y-%m-%d")
-                    m_ret = get_1d_return_of_ticker(market_index, dt)
-                    if m_ret is None:
-                        raise HTTPException(
-                            status_code=404,
-                            detail=f"could not fetch 1-day return for market index {market_index} on {dt}, cannot calculate market cumulative returns",
-                        )
-                    cumulative_market += m_ret
-                    market_map[d] = cumulative_market
-            except Exception:
-                market_map = {}
-
-            date_to_reaction_data[filing_date] = {
-                "reaction": reaction[filing_date],
-                "surprise": surprise["surprise"][filing_date],
-                "market": market_map,
-            }
-
-        except HTTPException as e:
-            logger.error(
-                f"Error calculating reaction for {ticker} on {filing_date}: {e.detail}"
-            )
-            date_to_reaction_data[filing_date] = {
-                "reaction": e.detail,
-                "surprise": surprise["surprise"][filing_date],
-            }
+            sorted_dates = sorted(reaction[filings_date].keys())
+            cumulative_market = 0.0
+            for d in sorted_dates[:threshold_reaction_days]:
+                # one-day return for the market index on this date
+                dt = datetime.strptime(d, "%Y-%m-%d")
+                m_ret = get_1d_return_of_ticker("SPY", dt)
+                if m_ret is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"could not fetch 1-day return for market index SPY on {dt}, cannot calculate market cumulative returns",
+                    )
+                cumulative_market += m_ret
+                market_map[d] = cumulative_market
+        except Exception:
+            market_map = {}
+        date_to_reaction_data[filings_date] = {
+            "reaction": {k:v for i, (k,v) in enumerate(reaction[filings_date].items()) if i < threshold_reaction_days},
+            "surprise": surprise["surprise"][filings_date],
+            "market": market_map,
+        }
 
     return {
         "ticker": ticker,
@@ -485,7 +259,7 @@ async def _fetch_surprise_and_latest_reaction(
     filings_date: str,
 ):
     surprise_data = await get_ticker_surprise(sbac, ticker, filings_date)
-    reaction_data = await get_ticker_reaction(sbac, ticker, filing_date=filings_date)
+    reaction_data = await get_ticker_reaction(sbac, ticker, filings_date=filings_date)
 
     if (
         surprise_data is not None
@@ -499,7 +273,7 @@ async def _fetch_surprise_and_latest_reaction(
             reaction_data[filings_date][latest_reaction_key],
         )
 
-    surprise_reaction_data = await _fetch_reaction_for_ticker(
+    surprise_reaction_data = await fetch_reaction_for_ticker(
         sbac,
         ticker,
         ReactionRequest(
@@ -530,14 +304,12 @@ async def _fetch_surprise_and_latest_reaction(
 
     return surprise_value, reaction_value
 
+
 @reader_router.get("/{ticker}/proportionate")
-async def fetch_proportionality_for_ticker(ticker: str, proportionate_request: PropotionateRequest = Query(...)):
-    sbac = get_sbac(reader_router)
-    return await _fetch_proportionality_for_ticker(sbac, ticker, proportionate_request)
-async def _fetch_proportionality_for_ticker(
-    sbac: AsyncClient,
-    ticker: str,
-    proportionate_request: PropotionateRequest,
+async def fetch_proportionality_for_ticker(
+    sbac: AsyncClient = Depends(get_sbac),
+    ticker: str = Path(),
+    proportionate_request: PropotionateRequest = Query(...),
 ):
     filings_date = (
         normalize_date_str(proportionate_request.filings_date)
@@ -556,14 +328,19 @@ async def _fetch_proportionality_for_ticker(
     proportionality_data = await get_ticker_propotionality_data(
         sbac, ticker_sector, filings_date
     )
-
     if proportionality_data is None:
-        all_companies_in_sector: List[str] = SP500_COMPANIES[
-            SP500_COMPANIES["GICS Sector"] == ticker_sector
-        ]["Symbol"].tolist()
-        proportionality_data = await _compute_proportionality_model_for_ticker(
-            sbac, ticker_sector, all_companies_in_sector
+        raise HTTPException(
+            status_code=404,
+            detail=f"No proportionality model found for sector {ticker_sector} on filing date {filings_date}",
         )
+
+    # if proportionality_data is None:
+    #     all_companies_in_sector: List[str] = SP500_COMPANIES[
+    #         SP500_COMPANIES["GICS Sector"] == ticker_sector
+    #     ]["Symbol"].tolist()
+    #     proportionality_data = await _compute_proportionality_model_for_ticker(
+    #         sbac, ticker_sector, all_companies_in_sector
+    #     )
 
     valid_dates = (
         [filings_date]
@@ -632,6 +409,23 @@ async def _fetch_proportionality_for_ticker(
 
 
 @reader_router.get("/sp500/surprises")
-async def fetch_sp500_surprises():
-    sbac = get_sbac(reader_router)
-    return await get_sp500_latest_surprises(sbac)
+async def fetch_sp500_surprises(sbac: AsyncClient = Depends(get_sbac)):
+    resp = await get_sp500_latest_surprises(sbac)
+    if resp is None:
+        raise HTTPException(
+            status_code=404,
+            detail="could not fetch latest surprises for S&P 500 companies",
+        )
+    return {
+        "count": len(resp),
+        "items": [
+            {
+                "ticker": row["symbol"],
+                "company_name": SP500_COMPANIES[SP500_COMPANIES["Symbol"] == row["symbol"]]["Security"].values[0],
+                "sector": SP500_COMPANIES[SP500_COMPANIES["Symbol"] == row["symbol"]]["GICS Sector"].values[0],
+                "filings_date": row["filings_date"],
+                "surprise": row["surprise"],
+                "latest_reaction": row["reaction"]
+            } for row in resp if isinstance(row, Dict)
+        ]
+    }

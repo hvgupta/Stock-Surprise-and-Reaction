@@ -7,7 +7,6 @@ dependencies = [
     "aiohttp",
     "fastapi[standard]",
     "lxml>=6.1.0",
-    "matplotlib>=3.10.0",
     "mypy>=1.20.2",
     "pandas>=3.0.2",
     "pydantic>=2.13.3",
@@ -33,4 +32,5 @@ tool-backend = "fastapi dev backend/app.py"
 [dependency-groups]
 dev = [
     "ipykernel>=7.2.0",
+    "matplotlib>=3.10.9",
 ]

@@ -16,7 +16,7 @@ export default function SurpriseCard({ item }: SurpriseCardProps) {
   const query = new URLSearchParams({
     company_name: item.company_name,
     sector: item.sector,
-    filing_date: item.filing_date,
+    filing_date: item.filings_date,
     surprise: String(item.surprise),
   });
 

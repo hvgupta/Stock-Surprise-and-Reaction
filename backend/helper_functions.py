@@ -69,7 +69,7 @@ async def get_reaction_for_date(
         ):
             return None
 
-    cached = await get_ticker_reaction(sbac, ticker, filing_date=cur_filing_date, reaction_date=cur_date)
+    cached = await get_ticker_reaction(sbac, ticker, filings_date=cur_filing_date, reaction_date=cur_date)
     if cached is None:
         logger.info(
             f"Reaction for {ticker} on filing date {cur_filing_date} and date {cur_date} not found in database, calculating reaction"

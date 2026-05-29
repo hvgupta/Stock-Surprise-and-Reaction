@@ -4,7 +4,7 @@ export type SP500TickerSnapshot = {
   ticker: string;
   company_name: string;
   sector: string;
-  filing_date: string;
+  filings_date: string;
   surprise: number;
   latest_reaction?: number | null;
 };

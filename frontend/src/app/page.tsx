@@ -55,10 +55,10 @@ export default function Home() {
         continue;
       }
 
-      const currentTs = Date.parse(current.filing_date);
-      const nextTs = Date.parse(item.filing_date);
+      const currentTs = Date.parse(current.filings_date);
+      const nextTs = Date.parse(item.filings_date);
       if (Number.isNaN(currentTs) || Number.isNaN(nextTs)) {
-        if (item.filing_date > current.filing_date) {
+        if (item.filings_date > current.filings_date) {
           byTicker.set(item.ticker, item);
         }
         continue;
@@ -156,7 +156,7 @@ export default function Home() {
 
       const outliers = latestItems
         .filter((it) => it.sector === sector)
-        .map((it) => ({ ticker: it.ticker, company_name: it.company_name, surprisePct: it.surprise * 100, filing_date: it.filing_date }))
+        .map((it) => ({ ticker: it.ticker, company_name: it.company_name, surprisePct: it.surprise * 100, filing_date: it.filings_date }))
         .filter((it) => it.surprisePct < lower || it.surprisePct > upper)
         .sort((a, b) => Math.abs(b.surprisePct) - Math.abs(a.surprisePct));
 
@@ -369,7 +369,7 @@ export default function Home() {
               ) : (
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {outliers.map((it) => {
-                    const matched = latestItems.find((x) => x.ticker === it.ticker && x.filing_date === it.filing_date);
+                    const matched = latestItems.find((x) => x.ticker === it.ticker && x.filings_date === it.filing_date);
                     return matched ? (
                       <SurpriseCard key={it.ticker + it.filing_date} item={matched} />
                     ) : (

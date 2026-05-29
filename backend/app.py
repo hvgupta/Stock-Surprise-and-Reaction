@@ -1,24 +1,24 @@
-from contextlib import asynccontextmanager
-
 import os
 import dotenv
-from typing import cast
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.logger import get_configured_logger
-from backend.supabase import create_async_client, AsyncClient
-from backend.model import ReactionRequest, PropotionateRequest
+from backend.supabase import create_async_client
 
 logger = get_configured_logger(__name__)
 
 dotenv.load_dotenv(override=True)
 
-ADMIN_MODE = os.getenv("SUPABASE_ADMIN_API_KEY") is not None
+ADMIN_MODE = os.getenv("SUPABASE_ADMIN_API_KEY")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    sbac = create_async_client()
+    if ADMIN_MODE is not None:
+        logger.info("ADMIN key is provided")
+    sbac = create_async_client(ADMIN_MODE)
+    logger.info("Initializing Supabase AsyncClient")
     app.state.supabase_client = sbac
     yield
     
@@ -33,9 +33,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from backend.router import reader_router
+from backend.router import reader_router, writer_router
 
 app.include_router(reader_router)
+app.include_router(writer_router)
 
 @app.get("/health")
 async def health_check():

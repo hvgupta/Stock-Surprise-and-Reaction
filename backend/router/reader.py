@@ -367,7 +367,7 @@ async def fetch_proportionality_for_ticker(
             f"Computed proportionality for {ticker}: expected_CAR={expected_CAR}, actual_CAR={actual_CAR}"
         )
         pct_diff_dict[date] = {
-            "pct_diff_from_expected": (actual_CAR - expected_CAR) / abs(expected_CAR),
+            "pct_diff": (actual_CAR - expected_CAR),
             "expected_CAR": expected_CAR,
             "actual_CAR": actual_CAR,
             "regression_model": {

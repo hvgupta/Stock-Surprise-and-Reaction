@@ -8,6 +8,7 @@ import LoadingSpinner from "@/components/loading-spinner";
 import ReactionTimelineChart from "@/components/reaction-timeline-chart";
 import RegressionChart from "@/components/regression-chart";
 import CombinedProportionalityReactionChart from "@/components/combined-proportionality-reaction-chart";
+import SectionNav from "@/components/section-nav";
 import {
   getGeneratedProportionalityPlotData,
   getTickerProportionality,
@@ -231,7 +232,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
   const regressionModel: RegressionModelValues | null = proportionalityEntry?.regression_model ?? null;
 
   const proportionFlag = useMemo(() => {
-    const pct = proportionalityEntry?.pct_diff_from_expected;
+    const pct = proportionalityEntry?.pct_diff;
     if (typeof pct !== "number") return { label: "Unknown", style: "bg-zinc-50 text-zinc-700" };
     if (pct > 0.2) return { label: "Above proportionate", style: "bg-blue-50 text-blue-700" };
     if (pct < -0.2) return { label: "Below proportionate", style: "bg-red-50 text-red-700" };
@@ -240,7 +241,18 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
 
   return (
     <div className="pb-10 pt-8">
-      <main className="page-shell">
+      <main className="page-shell lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
+        <SectionNav
+          title="Ticker sections"
+          items={[
+            { href: "#overview", label: "Overview", description: "Ticker, filing date, and surprise" },
+            { href: "#reaction-model", label: "Reaction & Model", description: "Regression and proportionality" },
+            { href: "#reaction-timeline", label: "Reaction Timeline", description: "CAR progression by day" },
+          ]}
+          className="mb-6 lg:sticky lg:top-6 lg:mb-0 lg:self-start"
+        />
+
+        <div className="min-w-0">
         <Link href="/" className="text-sm font-semibold text-brand hover:underline">
           ← Back to Top 10 / Search
         </Link>
@@ -260,7 +272,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
 
         {companyName ? (
           <>
-            <section className="stat-card mt-4 rounded-2xl p-6">
+            <section id="overview" className="stat-card mt-4 rounded-2xl p-6 scroll-mt-24">
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <h1 className="text-3xl font-black">{symbol}</h1>
@@ -317,11 +329,11 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
                 </p>
               </article>
               <article className="stat-card rounded-2xl p-4">
-                <p className="text-xs uppercase tracking-[0.12em] text-zinc-600">% Diff From Expected</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-zinc-600">% Diff</p>
                 <p className="mt-2 font-mono text-xl font-semibold">
                   {proportionalityLoading
                     ? "Loading..."
-                    : formatSignedPercent(proportionalityEntry?.pct_diff_from_expected ?? null)}
+                    : formatSignedPercent(proportionalityEntry?.pct_diff ?? null)}
                 </p>
               </article>
             </section>
@@ -336,7 +348,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
               </section>
             ) : null} */}
 
-            <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
+            <section id="reaction-model" className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4 scroll-mt-24">
               <h2 className="text-lg font-bold">Reaction and Proportionality Model</h2>
               {regressionModel ? (
                 <div className="mt-3">
@@ -370,7 +382,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
               )}
             </section>
             {/* CAR Timeline Chart */}
-            <section className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4">
+            <section id="reaction-timeline" className="mt-5 rounded-2xl border border-emerald-200 bg-white p-4 scroll-mt-24">
               <h2 className="text-lg font-bold">Reaction Timeline (CAR %)</h2>
               <p className="mt-1 text-xs text-zinc-500">
                 Cumulative Abnormal Return accumulating day-by-day after the filing date
@@ -383,6 +395,7 @@ export default function TickerDetailsPage({ params }: TickerDetailsPageProps) {
             {/* Generated proportionality plot removed — combined view used above when available */}
           </>
         ) : null}
+        </div>
       </main>
     </div>
   );

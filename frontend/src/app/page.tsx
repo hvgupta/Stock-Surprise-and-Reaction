@@ -9,6 +9,7 @@ import SummaryStatsBanner from "@/components/summary-stats-banner";
 import SectorSurpriseChart from "@/components/sector-surprise-chart";
 import SurpriseHistogram, { type HistogramBucket } from "@/components/surprise-histogram";
 import SurpriseReactionScatter from "@/components/surprise-reaction-scatter";
+import SectionNav from "@/components/section-nav";
 import { fetchSP500SurprisesFresh, type SP500TickerSnapshot } from "@/lib/api";
 
 const HISTOGRAM_BUCKETS: Array<{ label: string; min: number; max: number; isPositive: boolean }> = [
@@ -206,7 +207,19 @@ export default function Home() {
 
   return (
     <div className="pb-10 pt-8">
-      <main className="page-shell">
+      <main className="page-shell lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
+        <SectionNav
+          title="Dashboard sections"
+          items={[
+            { href: "#overview", label: "Overview", description: "Search and summary context" },
+            { href: "#season-analytics", label: "Season Analytics", description: "Sector and histogram views" },
+            { href: "#top-movers", label: "Top Movers", description: "Largest absolute surprises" },
+            { href: "#sector-outliers", label: "Sector Outliers", description: "IQR-based outlier filings" },
+          ]}
+          className="mb-6 lg:sticky lg:top-6 lg:mb-0 lg:self-start"
+        />
+
+        <div className="min-w-0">
         {isLoading ? <LoadingSpinner label="Loading season analytics..." className="min-h-64" /> : null}
 
         {!isLoading && errorMessage ? (
@@ -216,7 +229,7 @@ export default function Home() {
         ) : null}
 
         {!isLoading && !errorMessage && latestItems.length > 0 ? (
-          <section className="mb-8 space-y-6">
+          <section id="season-analytics" className="mb-8 space-y-6 scroll-mt-24">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-foreground">Season Analytics</h2>
               <span className="text-xs text-zinc-500">{summaryStats.total} companies loaded</span>
@@ -300,7 +313,7 @@ export default function Home() {
             ) : null}
           </section>
         ) : null}
-        <section className="mb-6 rounded-3xl border border-emerald-200/80 bg-surface p-6 shadow-sm">
+        <section id="overview" className="mb-6 rounded-3xl border border-emerald-200/80 bg-surface p-6 shadow-sm scroll-mt-24">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand-2">
             Market Surprise Reaction
           </p>
@@ -331,7 +344,7 @@ export default function Home() {
           </div>
         </section>
         {!isLoading && !errorMessage ? (
-          <>
+          <section id="top-movers" className="scroll-mt-24">
             <h2 className="mb-3 text-xl font-bold text-foreground">
               {hasActiveFilters ? "Filtered Tickers" : "Top Movers"}
             </h2>
@@ -345,7 +358,7 @@ export default function Home() {
                 <SurpriseCard key={item.ticker} item={item} />
               ))}
             </section>
-          </>
+          </section>
         ) : null}
 
         {!isLoading && !errorMessage && visibleItems.length === 0 ? (
@@ -353,7 +366,7 @@ export default function Home() {
             No matches found.
           </section>
         ) : null}
-        <div className="mt-4 rounded-2xl border border-emerald-200 p-4">
+        <section id="sector-outliers" className="mt-4 rounded-2xl border border-emerald-200 p-4 scroll-mt-24">
           <h3 className="mb-1 text-sm font-semibold uppercase tracking-[0.14em] text-zinc-600">Sector Outliers</h3>
           <p className="mb-3 text-xs text-zinc-400">Outlier filings per sector (IQR method). Click a ticker to open details.</p>
           {Array.from(sectorOutliers.entries()).map(([sector, outliers]) => (
@@ -397,6 +410,7 @@ export default function Home() {
               )}
             </details>
           ))}
+        </section>
         </div>
       </main>
     </div>

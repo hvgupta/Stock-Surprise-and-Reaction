@@ -15,7 +15,7 @@ export type SP500SurprisesResponse = {
 };
 
 export type ProportionalityValues = {
-  pct_diff_from_expected: number;
+  pct_diff: number;
   expected_CAR: number;
   actual_CAR: number;
 };

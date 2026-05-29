@@ -70,7 +70,7 @@ class RegressionModelValues(TypedDict):
 
 
 class ProportionalityResponseEntry(TypedDict):
-    pct_diff_from_expected: float
+    pct_diff: float
     expected_CAR: float
     actual_CAR: float
     regression_model: RegressionModelValues

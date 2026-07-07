@@ -39,7 +39,6 @@ def get_1d_return_of_ticker(ticker: str, date: datetime) -> Optional[float]:
     returns in this case is defined as the returns from date-1d("closing") to date("closing")
     """
     logger.info(f"Fetching 1-day return for {ticker} on {date}")
-    yf_ticker = yf.Ticker(ticker)
 
     start_date = round_to_working_day(date - timedelta(days=1), inc=False).strftime(
         "%Y-%m-%d"
@@ -52,15 +51,7 @@ def get_1d_return_of_ticker(ticker: str, date: datetime) -> Optional[float]:
         f"Calculated start_date: {start_date}, end_date: {end_date} for ticker {ticker} and date {date}"
     )
 
-    try:
-        # Get data including the target date
-        hist = yf_ticker.history(start=start_date, end=end_date)
-    except Exception as e:
-        logger.error(f"Error fetching 1-day return for {ticker} on {date}: {e}")
-        return None
-
-    if hist.empty:
-        logger.warning(f"No historical data found for {ticker} on {date}")
+    if (hist := get_ticker_price_data(ticker, start_date, end_date)) is None:
         return None
 
     closing_prices: Series[float] = hist["Close"]
@@ -70,3 +61,33 @@ def get_1d_return_of_ticker(ticker: str, date: datetime) -> Optional[float]:
     return float(
         (closing_prices.iloc[-1] - closing_prices.iloc[0]) / closing_prices.iloc[0]
     )
+
+
+def get_ticker_price_data(
+    ticker: str, start_date: Optional[str] = None, end_date: Optional[str] = None
+):
+    logger.info(
+        f"getting ticker price of {ticker} for the time range {start_date} - {end_date}"
+    )
+    yf_ticker = yf.Ticker(ticker)
+
+    logger.info(
+        f"Calculated start_date: {start_date}, end_date: {end_date} for ticker {ticker}"
+    )
+
+    try:
+        # Get data including the target date
+        hist = yf_ticker.history(start=start_date, end=end_date)
+    except Exception as e:
+        logger.error(
+            f"Error fetching price information for the time range {start_date} - {end_date}"
+        )
+        return None
+
+    if hist.empty:
+        logger.warning(
+            f"Historical data of {ticker} is not found for the time range {start_date} - {end_date}"
+        )
+        return None
+
+    return hist

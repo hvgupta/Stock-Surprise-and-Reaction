@@ -1,4 +1,4 @@
-from .yf import get_1d_return_of_ticker, get_earnings_history_of_ticker, round_to_working_day
+from .yf import get_1d_return_of_ticker, get_earnings_history_of_ticker, round_to_working_day, get_ticker_price_data
 from .SP500_companies import fetch_sp500_companies
 from .financials import calc_reaction_of_ticker, calc_surprise_of_ticker
 
@@ -12,4 +12,5 @@ __all__ = [
     "calc_reaction_of_ticker",
     "get_earnings_history_of_ticker",
     "round_to_working_day",
+    "get_ticker_price_data"
 ]

@@ -23,4 +23,12 @@ def calc_pre_event_drift(price_data: pd.DataFrame, default_col: str = "Close"):
     mean, sd = ratio_array.mean(), ratio_array.std()
 
     return (mean/price_data.shape[0]) + (sd**2)/2
-    
+
+def calc_realized_volatility(price_data: pd.DataFrame, default_col: str = "Close"):
+    col_data = price_data[default_col]
+    ratio_array = (col_data/col_data.shift()).dropna().values
+    ln_price_ratio = np.log(ratio_array)
+    if not isinstance(ln_price_ratio, np.ndarray):
+        raise Exception
+
+    return ln_price_ratio.std()

@@ -2,7 +2,6 @@ from backend.logger import get_configured_logger
 
 logger = get_configured_logger(__name__)
 
-import re
 import pandas as pd
 import yfinance as yf
 from pandas import Series

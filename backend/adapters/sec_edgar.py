@@ -1,4 +1,7 @@
-import re
+from backend.logger import get_configured_logger
+
+logger = get_configured_logger(__name__)
+
 import aiohttp
 import requests
 import pandas as pd
@@ -9,7 +12,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Company info@company.com)"}
 
 
 def fetch_ticker_to_cik_map() -> Dict[str, str]:
-    print("Fetching ticker to CIK mapping from SEC (async)")
+    logger.info("Fetching ticker to CIK mapping from SEC (async)")
     url = "https://www.sec.gov/files/company_tickers.json"
     response = requests.get(url, headers=HEADERS)
     response.raise_for_status()
@@ -18,12 +21,12 @@ def fetch_ticker_to_cik_map() -> Dict[str, str]:
         for info in response.json().values()
     }
 
-    print("Successfully fetched ticker to CIK mapping")
+    logger.info("Successfully fetched ticker to CIK mapping")
     return ticker_to_cik_map
 
 
 async def fetch_sec_concepts(cik: str) -> dict:
-    print(f"Fetching SEC concepts for CIK={cik} (async)")
+    logger.info(f"Fetching SEC concepts for CIK={cik} (async)")
     url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
     async with aiohttp.ClientSession(headers=HEADERS) as session:
         async with session.get(url) as resp:
@@ -76,12 +79,12 @@ def _compute_missing_quarter_from_fy(
             present[q] = val_num
 
     if len(present) == 4:
-        print(f"All quarters present for {year}, no imputation needed")
+        logger.info(f"All quarters present for {year}, no imputation needed")
         return y_q_to_quantity_map
 
     missing_qs = [q for q in ("Q1", "Q2", "Q3", "Q4") if q not in present]
     if len(missing_qs) != 1:
-        print(
+        logger.warning(
             f"{year} has {len(missing_qs)} missing quarters; need exactly 1 to impute"
         )
         return y_q_to_quantity_map
@@ -97,35 +100,39 @@ def _compute_missing_quarter_from_fy(
         quantity_name: imputed_val,
         "fp": missing_q,
     }
-    print(
+    logger.info(
         f"Computed {missing_q} for {year}: {quantity_name}={imputed_val} "
         f"(FY {fy_val} - sum_other_three {sum_three})"
     )
     return y_q_to_quantity_map
 
 
-def _get_frame_data(table: pd.DataFrame, year: int, quarter: str):
-    subset = table[(table["frame"] == f"CY{year}{quarter}")].sort_values(
-        "filed", ascending=False
-    )
+def _get_frame_data(table: pd.DataFrame, year: int, quarter: str, is_instant: bool):
+    subset = table[
+        (table["frame"] == f"CY{year}{quarter}{'I' if is_instant else ''}")
+    ].sort_values("filed", ascending=False)
 
     if subset.empty:
-        print(f"No data for year {year} quarter {quarter}")
+        logger.error(f"No data for year {year} quarter {quarter}")
         return None
 
     return subset.iloc[0]
 
 
 def clean_period_table(
-    table_val: pd.DataFrame, start_year: int, end_year: int, quantity_name: str
+    table_val: pd.DataFrame,
+    start_year: int,
+    end_year: int,
+    quantity_name: str,
+    is_instant: bool,
 ):
-    print(f"Starting to clean EPS table with {len(table_val)} rows")
+    logger.info(f"Starting to clean EPS table with {len(table_val)} rows")
     filtered_period_table = pd.DataFrame(columns=["start", "end", quantity_name, "fp"])
     y_q_to_quantity_map = {}
     for year in range(start_year, end_year + 1):
         for quarter in ["Q1", "Q2", "Q3", "Q4"]:
 
-            y_q_eps_table = _get_frame_data(table_val, year, quarter)
+            y_q_eps_table = _get_frame_data(table_val, year, quarter, is_instant)
             if y_q_eps_table is None:
                 continue
 
@@ -138,7 +145,7 @@ def clean_period_table(
                 "fp": quarter,
             }
 
-        y_q_eps_table = _get_frame_data(table_val, year, "")
+        y_q_eps_table = _get_frame_data(table_val, year, "", is_instant)
         if y_q_eps_table is None:
             print(f"No FY data for year {year}, cannot impute missing quarters")
             continue
@@ -163,6 +170,7 @@ def clean_period_table(
     filtered_period_table["end"] = pd.to_datetime(filtered_period_table["end"])
 
     return filtered_period_table
+
 
 def conv_dict_to_df(facts: dict, metric_name: str, unit: str) -> pd.DataFrame:
     """

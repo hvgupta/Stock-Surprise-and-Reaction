@@ -139,3 +139,13 @@ def normalize_x(unnormalized_x: list[float]) -> Tuple[NDArray[np.float64], np.fl
     sd = np.std(unnormalized_x)
 
     return (np.array(unnormalized_x) - mean) / (sd + 1e-8), np.float64(mean), np.float64(sd)
+
+def fyqrt_to_numeric(fyqrt: Tuple[int, str]) -> float:
+    fy, qrt = fyqrt
+    if qrt not in ["Q1", "Q2", "Q3", "Q4"]:
+        raise Exception("can only be the four quarters")
+    return fy + ((int(qrt[1])-1)/4)
+
+def numeric_to_fyqrt(fy_num: float) -> Tuple[int, str]:
+    qrt_num = int((fy_num % 1)*4+1)
+    return int(fy_num), f"Q{qrt_num}"

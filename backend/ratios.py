@@ -1,3 +1,4 @@
+from .helper_functions import fyqrt_to_numeric, numeric_to_fyqrt
 from .adapters import (
     TICKER_TO_CIK_MAP,
     fetch_sec_concepts,
@@ -96,6 +97,7 @@ def get_cleaned_fact(
         fact_df = conv_dict_to_df(concepts["facts"], fact_key, "USD")
         if fact_df.empty:
             logger.warning(f"skipping {fact_key=} because its fact_df was empty")
+            continue
         cleaned_fact_df_data = clean_period_table(
             fact_df, start_fyqrt[0], end_fyqrt[0], "key_name", is_instant
         )
@@ -138,13 +140,13 @@ async def get_current_ratio(ticker: str, ticker_concepts: Optional[Dict[str, Any
     )
 
     current_assets = get_cleaned_fact(
-        ticker_concepts, ["AssetsCurrent"], start_fyqrt, end_fyqrt
+        ticker_concepts, ["AssetsCurrent"], start_fyqrt, end_fyqrt, True
     )
     if current_assets is None:
         return None
 
     current_liabilities = get_cleaned_fact(
-        ticker_concepts, ["LiabilitiesCurrent"], start_fyqrt, end_fyqrt
+        ticker_concepts, ["LiabilitiesCurrent"], start_fyqrt, end_fyqrt, True
     )
     if current_liabilities is None:
         return None
@@ -157,11 +159,10 @@ async def get_current_ratio(ticker: str, ticker_concepts: Optional[Dict[str, Any
     )
 
     merged["current_ratio"] = (
-        merged["key_value_assets"] / merged["key_value_liabilities"]
+        merged["key_name_assets"] / merged["key_name_liabilities"]
     )
 
     return merged
-
 
 async def get_asset_turnover(ticker: str, ticker_concepts: Optional[Dict[str, Any]]):
 
@@ -171,6 +172,8 @@ async def get_asset_turnover(ticker: str, ticker_concepts: Optional[Dict[str, An
     start_fyqrt, end_fyqrt = _get_fyqrt_of_date(BACKFILL_DATES[0]), _get_fyqrt_of_date(
         BACKFILL_DATES[-1]
     )
+    
+    prev_fyqrt = numeric_to_fyqrt(fyqrt_to_numeric(start_fyqrt) - 0.25)
 
     revenues = get_cleaned_fact(
         ticker_concepts,
@@ -179,13 +182,13 @@ async def get_asset_turnover(ticker: str, ticker_concepts: Optional[Dict[str, An
             "RevenueFromContractWithCustomerExcludingAssessedTax",
             "Revenues",
         ],
-        start_fyqrt,
+        prev_fyqrt,
         end_fyqrt,
     )
     if revenues is None:
         return None
 
-    assets = get_cleaned_fact(ticker_concepts, ["Assets"], start_fyqrt, end_fyqrt)
+    assets = get_cleaned_fact(ticker_concepts, ["Assets"], prev_fyqrt, end_fyqrt, True)
     if assets is None:
         return None
 
@@ -198,10 +201,12 @@ async def get_asset_turnover(ticker: str, ticker_concepts: Optional[Dict[str, An
 
     merged = merged.sort_values("end")
     merged["avg_assets"] = (
-        merged["key_value_assets"] + merged["key_value_assets"].shift(1)
+        merged["key_name_assets"] + merged["key_name_assets"].shift(1)
     ) / 2
 
-    merged["asset_turnover"] = merged["key_value_rev"] / merged["avg_assets"]
+    merged.dropna(inplace=True)
+
+    merged["asset_turnover"] = merged["key_name_rev"] / merged["avg_assets"]
 
     return merged
 
@@ -243,7 +248,7 @@ async def get_gross_profit_percentage(
     )
 
     merged["gross_profit_percentage"] = (
-        merged["key_value_gross_profit"] / merged["key_value_rev"]
+        merged["key_name_gross_profit"] / merged["key_name_rev"]
     )
 
     return merged

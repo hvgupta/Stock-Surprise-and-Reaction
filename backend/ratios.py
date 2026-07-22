@@ -55,7 +55,7 @@ def calc_pre_event_drift(ticker: str):
         if price_data is None:
             logger.error("price data is None")
             continue
-        price_data[d] = single_calc(price_data)
+        drift_data[d] = single_calc(price_data)
 
     return drift_data
 
@@ -140,13 +140,13 @@ async def get_current_ratio(ticker: str, ticker_concepts: Optional[Dict[str, Any
     )
 
     current_assets = get_cleaned_fact(
-        ticker_concepts, ["AssetsCurrent"], start_fyqrt, end_fyqrt, True
+        ticker_concepts, ["AssetsCurrent", "Assets"], start_fyqrt, end_fyqrt, True
     )
     if current_assets is None:
         return None
 
     current_liabilities = get_cleaned_fact(
-        ticker_concepts, ["LiabilitiesCurrent"], start_fyqrt, end_fyqrt, True
+        ticker_concepts, ["LiabilitiesCurrent", "Liabilities"], start_fyqrt, end_fyqrt, True
     )
     if current_liabilities is None:
         return None
@@ -158,11 +158,10 @@ async def get_current_ratio(ticker: str, ticker_concepts: Optional[Dict[str, Any
         how="inner",
     )
 
-    merged["current_ratio"] = (
-        merged["key_name_assets"] / merged["key_name_liabilities"]
-    )
+    merged["current_ratio"] = merged["key_name_assets"] / merged["key_name_liabilities"]
 
     return merged
+
 
 async def get_asset_turnover(ticker: str, ticker_concepts: Optional[Dict[str, Any]]):
 
@@ -172,7 +171,7 @@ async def get_asset_turnover(ticker: str, ticker_concepts: Optional[Dict[str, An
     start_fyqrt, end_fyqrt = _get_fyqrt_of_date(BACKFILL_DATES[0]), _get_fyqrt_of_date(
         BACKFILL_DATES[-1]
     )
-    
+
     prev_fyqrt = numeric_to_fyqrt(fyqrt_to_numeric(start_fyqrt) - 0.25)
 
     revenues = get_cleaned_fact(
@@ -235,7 +234,7 @@ async def get_gross_profit_percentage(
         return None
 
     gross_profit = get_cleaned_fact(
-        ticker_concepts, ["GrossProfit"], start_fyqrt, end_fyqrt
+        ticker_concepts, ["NetIncomeLoss", "GrossProfit"], start_fyqrt, end_fyqrt
     )
     if gross_profit is None:
         return gross_profit
@@ -247,7 +246,7 @@ async def get_gross_profit_percentage(
         how="inner",
     )
 
-    merged["gross_profit_percentage"] = (
+    merged["gross_profit_pct"] = (
         merged["key_name_gross_profit"] / merged["key_name_rev"]
     )
 

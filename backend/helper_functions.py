@@ -1,4 +1,4 @@
-from backend.supabase import AsyncClient, get_ticker_reaction, DateValues
+from backend.db_functions.supabase import AsyncClient, get_ticker_reaction, DateValues
 from backend.logger import get_configured_logger
 # from backend.adapters import (
 #     round_to_working_day,

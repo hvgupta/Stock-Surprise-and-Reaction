@@ -3,7 +3,7 @@ from backend.logger import get_configured_logger
 logger = get_configured_logger(__name__)
 
 import sqlite3
-from typing import Iterable, Optional, Dict, overload, Union, Tuple
+from typing import Iterable, Optional, Dict, Tuple
 
 type DateValues[T] = Dict[str, T]
 

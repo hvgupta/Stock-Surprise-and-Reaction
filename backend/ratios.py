@@ -33,7 +33,7 @@ def calc_reaction_of_ticker(ticker_returns: float, market_returns: float) -> flo
     return ticker_returns - market_returns
 
 
-def calc_pre_event_drift(ticker: str):
+async def calc_pre_event_drift(ticker: str):
     def single_calc(price_data: pd.DataFrame, default_col: str = "Close"):
         col_data = price_data[default_col]
         ratio_array = (col_data / col_data.shift()).dropna().values
@@ -60,7 +60,7 @@ def calc_pre_event_drift(ticker: str):
     return drift_data
 
 
-def calc_realized_volatility(ticker: str):
+async def calc_realized_volatility(ticker: str):
     def single_calc(price_data: pd.DataFrame, default_col: str = "Close"):
         col_data = price_data[default_col]
         ratio_array = (col_data / col_data.shift()).dropna().values
@@ -146,7 +146,11 @@ async def get_current_ratio(ticker: str, ticker_concepts: Optional[Dict[str, Any
         return None
 
     current_liabilities = get_cleaned_fact(
-        ticker_concepts, ["LiabilitiesCurrent", "Liabilities"], start_fyqrt, end_fyqrt, True
+        ticker_concepts,
+        ["LiabilitiesCurrent", "Liabilities"],
+        start_fyqrt,
+        end_fyqrt,
+        True,
     )
     if current_liabilities is None:
         return None
@@ -226,6 +230,7 @@ async def get_gross_profit_percentage(
             "RevenueFromContractWithCustomerIncludingAssessedTax",
             "RevenueFromContractWithCustomerExcludingAssessedTax",
             "Revenues",
+            "RegulatedAndUnregulatedOperatingRevenue",
         ],
         start_fyqrt,
         end_fyqrt,
@@ -234,7 +239,10 @@ async def get_gross_profit_percentage(
         return None
 
     gross_profit = get_cleaned_fact(
-        ticker_concepts, ["NetIncomeLoss", "GrossProfit"], start_fyqrt, end_fyqrt
+        ticker_concepts,
+        ["NetIncomeLoss", "GrossProfit", "ProfitLoss"],
+        start_fyqrt,
+        end_fyqrt,
     )
     if gross_profit is None:
         return gross_profit

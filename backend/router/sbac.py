@@ -1,4 +1,4 @@
-from backend.supabase import AsyncClient
+from backend.db_functions.supabase import AsyncClient
 
 from typing import cast
 from fastapi import Request

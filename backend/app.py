@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.logger import get_configured_logger
-from backend.supabase import create_async_client
+from backend.db_functions.supabase import create_async_client
 
 logger = get_configured_logger(__name__)
 

@@ -13,7 +13,7 @@ from backend.model import (
     ReactionEndpointResponse,
     SurpriseEndpointResponse,
 )
-from backend.supabase import (
+from backend.db_functions.supabase import (
     AsyncClient,
     get_ticker_surprise,
     get_ticker_reaction,
@@ -323,7 +323,7 @@ async def fetch_proportionality_for_ticker(
 
     ticker_sector: str = SP500_COMPANIES[SP500_COMPANIES["Symbol"] == ticker][
         "GICS Sector"
-    ].values[0]
+    ].values[0] # type: ignore 
 
     proportionality_data = await get_ticker_propotionality_data(
         sbac, ticker_sector, filings_date

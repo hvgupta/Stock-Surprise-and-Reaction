@@ -1,7 +1,7 @@
 from .sbac import get_sbac
 from .reader import fetch_reaction_for_ticker
 
-from backend.supabase import (
+from backend.db_functions.supabase import (
     AsyncClient,
     DateValues,
     insert_model_data_points,

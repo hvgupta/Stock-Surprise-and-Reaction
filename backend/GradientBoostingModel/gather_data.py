@@ -1,6 +1,6 @@
-from .adapters import SP500_COMPANIES
-from .logger import get_configured_logger
-from .db_functions.supabase import AsyncClient
+from ..adapters import SP500_COMPANIES
+from ..logger import get_configured_logger
+from ..db_functions.supabase import AsyncClient
 
 from typing import List, Dict, Union
 from postgrest import AsyncSelectRequestBuilder

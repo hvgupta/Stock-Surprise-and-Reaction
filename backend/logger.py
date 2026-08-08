@@ -12,8 +12,8 @@ def get_configured_logger(name):
         logger.addHandler(fh)
         
         # Console handler
-        ch = logging.StreamHandler()
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
+        # ch = logging.StreamHandler()
+        # ch.setFormatter(formatter)
+        # logger.addHandler(ch)
         
     return logger

@@ -130,8 +130,9 @@ def _get_fyqrt_of_date(date: str):
     return date_obj.year, f"Q{(date_obj.month - 1) // 3 + 1}"
 
 
-async def get_current_ratio(ticker: str, ticker_concepts: Optional[Dict[str, Any]]):
-
+async def get_current_ratio(
+    ticker: str, ticker_concepts: Optional[Dict[str, Any]] = None
+):
     if ticker_concepts is None:
         ticker_concepts = await fetch_sec_concepts(TICKER_TO_CIK_MAP[ticker])
 
@@ -162,7 +163,12 @@ async def get_current_ratio(ticker: str, ticker_concepts: Optional[Dict[str, Any
         how="inner",
     )
 
-    merged["current_ratio"] = merged["key_name_assets"] / merged["key_name_liabilities"]
+    # Ensure float to avoid integer division issues
+    assets = merged["key_name_assets"].astype(float)
+    liabilities = merged["key_name_liabilities"].astype(float)
+
+    # Safe division: set ratio to NaN where liabilities == 0
+    merged["current_ratio"] = assets / liabilities.replace(0, np.nan)
 
     return merged
 
@@ -209,7 +215,10 @@ async def get_asset_turnover(ticker: str, ticker_concepts: Optional[Dict[str, An
 
     merged.dropna(inplace=True)
 
-    merged["asset_turnover"] = merged["key_name_rev"] / merged["avg_assets"]
+    revenues = merged["key_name_rev"].astype(float)
+    avg_assets = merged["avg_assets"].astype(float)
+
+    merged["asset_turnover"] = revenues / avg_assets.replace(0, np.nan)
 
     return merged
 
@@ -254,8 +263,9 @@ async def get_gross_profit_percentage(
         how="inner",
     )
 
-    merged["gross_profit_pct"] = (
-        merged["key_name_gross_profit"] / merged["key_name_rev"]
-    )
+    gross_profit = merged["key_name_gross_profit"].astype(float)
+    revenues = merged["key_name_rev"].astype(float)
+
+    merged["gross_profit_pct"] = gross_profit / revenues.replace(0, np.nan)
 
     return merged

@@ -21,7 +21,9 @@ def create_async_client(API_KEY: Optional[str]):
 async def get_ticker_surprise(
     sbac: AsyncClient, symbol: str, filings_date: Optional[str] = None
 ) -> Optional[DateValues[float]]:
-    query = sbac.table("ticker_data").select("filings_date, surprise").eq("symbol", symbol)
+    query = (
+        sbac.table("ticker_data").select("filings_date, surprise").eq("symbol", symbol)
+    )
     if filings_date:
         query = query.eq("filings_date", filings_date)
 
@@ -166,29 +168,48 @@ async def get_model_data_points(sbac: AsyncClient, sector: str, filings_date: st
             f"Error fetching model data points for sector {sector} on {filings_date}: {e}"
         )
         return None
-    
-async def insert_model_data_points(admin_sbac: AsyncClient, sector: str, filings_date: str, data_points: dict):
-    try:
-        await admin_sbac.table("data_points").insert({
-            "sector": sector,
-            "filings_date": filings_date,
-            "data": data_points
-        }).execute()
-        logger.info(f"Successfully inserted model data points for sector {sector} on {filings_date}")
-    except Exception as e:
-        logger.error(f"Error inserting model data points for sector {sector} on {filings_date}: {e}")
 
 
-async def insert_proportionality_model(admin_sbac: AsyncClient, sector: str, filings_date: str, pct_surprise_mean: float, pct_surprise_sd: float, alpha: float, beta: float):
+async def insert_model_data_points(
+    admin_sbac: AsyncClient, sector: str, filings_date: str, data_points: dict
+):
     try:
-        await admin_sbac.table("proportionality_model").insert({
-            "sector": sector,
-            "filings_date": filings_date,
-            "pct_surprise_mean": pct_surprise_mean,
-            "pct_surprise_sd": pct_surprise_sd,
-            "alpha": alpha,
-            "beta": beta
-        }).execute()
-        logger.info(f"Successfully inserted proportionality model for sector {sector} on {filings_date}")
+        await admin_sbac.table("data_points").insert(
+            {"sector": sector, "filings_date": filings_date, "data": data_points}
+        ).execute()
+        logger.info(
+            f"Successfully inserted model data points for sector {sector} on {filings_date}"
+        )
     except Exception as e:
-        logger.error(f"Error inserting proportionality model for sector {sector} on {filings_date}: {e}")
+        logger.error(
+            f"Error inserting model data points for sector {sector} on {filings_date}: {e}"
+        )
+
+
+async def insert_proportionality_model(
+    admin_sbac: AsyncClient,
+    sector: str,
+    filings_date: str,
+    pct_surprise_mean: float,
+    pct_surprise_sd: float,
+    alpha: float,
+    beta: float,
+):
+    try:
+        await admin_sbac.table("proportionality_model").insert(
+            {
+                "sector": sector,
+                "filings_date": filings_date,
+                "pct_surprise_mean": pct_surprise_mean,
+                "pct_surprise_sd": pct_surprise_sd,
+                "alpha": alpha,
+                "beta": beta,
+            }
+        ).execute()
+        logger.info(
+            f"Successfully inserted proportionality model for sector {sector} on {filings_date}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Error inserting proportionality model for sector {sector} on {filings_date}: {e}"
+        )

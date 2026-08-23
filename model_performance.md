@@ -1,6 +1,4 @@
-The model being used here is a Graident Boosting Regressor model, with the hyper param tuning being done through the library Optuna.
-
-The features being used here is
+The features used for this project is the below
 ```json
     {
         "eps_actual": "The actual eps for the given earnings period",
@@ -21,7 +19,7 @@ The reason why each of the features where choosen
 - `eps_actual`, `surprise`, `pct_surprise_z_score`: One of the main factors of the reaction is eps
 - `drift`, `volatility`: this is to capture the pre-event price movement information
 - `current_ratio`, `gross_profit_pct`, `asset_turnover`, `gross_profit_z_score`: basic ratios to estimate the performance of the company
-- `day`: number of days from reaction date
+- `day`: number of days from reaction date (helped to increase the number of datapoints so that the model was able to generalize the problem better)
 
 ## Linear Regression
 The first model tested was the linear regression model:

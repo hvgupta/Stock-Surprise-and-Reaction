@@ -62,6 +62,8 @@ loss: squared_error
 The $R^2$ is much higher, however there is only a moderate improvement in the MSE.
 $7.687975387262753$ as compared to $16.212247956582114$
 
+![](./LightGBM_performance.png)
+
 ## Diagnostics
 
 The reason why the tree-based model could have stalled:
